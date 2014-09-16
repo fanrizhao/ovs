@@ -224,6 +224,21 @@ AC_DEFUN([OVS_CHECK_DPDK], [
   AM_CONDITIONAL([DPDK_NETDEV], test -n "$RTE_SDK")
 ])
 
+dnl Checks for --enable-blueswitch and defines BLUESWITCH if it is specified.
+AC_DEFUN([OVS_CHECK_BLUESWITCH],
+  [AC_ARG_ENABLE(
+     [blueswitch],
+     [AC_HELP_STRING([--enable-blueswitch],
+                     [Enable support for NetFPGA/Blueswitch])],
+     [case "${enableval}" in
+        (yes) blueswitch=true ;;
+        (no)  blueswitch=false ;;
+        (*) AC_MSG_ERROR([bad value ${enableval} for --enable-blueswitch]) ;;
+      esac],
+     [blueswitch=false])
+   AM_CONDITIONAL([BLUESWITCH], [test x$blueswitch = xtrue])])
+
+
 dnl OVS_GREP_IFELSE(FILE, REGEX, [IF-MATCH], [IF-NO-MATCH])
 dnl
 dnl Greps FILE for REGEX.  If it matches, runs IF-MATCH, otherwise IF-NO-MATCH.
