@@ -345,6 +345,12 @@ lib_libopenvswitch_la_SOURCES += \
        lib/netdev-dpdk.h
 endif
 
+if BLUESWITCH
+lib_libopenvswitch_la_SOURCES += \
+	lib/netdev-blueswitch.h \
+	lib/netdev-blueswitch.c
+endif
+
 if WIN32
 lib_libopenvswitch_la_SOURCES += \
 	lib/dpif-netlink.c \
