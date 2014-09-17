@@ -150,6 +150,10 @@ netdev_initialize(void)
         netdev_register_provider(&netdev_internal_class);
         netdev_vport_tunnel_register();
 #endif
+#ifdef HAVE_BLUESWITCH
+        netdev_register_provider(&netdev_blueswitch_class);
+#endif
+
         netdev_dpdk_register();
 
         ovsthread_once_done(&once);

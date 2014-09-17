@@ -236,7 +236,11 @@ AC_DEFUN([OVS_CHECK_BLUESWITCH],
         (*) AC_MSG_ERROR([bad value ${enableval} for --enable-blueswitch]) ;;
       esac],
      [blueswitch=false])
-   AM_CONDITIONAL([BLUESWITCH], [test x$blueswitch = xtrue])])
+   AM_CONDITIONAL([BLUESWITCH], [test x$blueswitch = xtrue])
+   if test "$blueswitch" = true; then
+      AC_DEFINE([HAVE_BLUESWITCH], [1], [Define to 1 if Blueswitch is enabled.])
+   fi
+])
 
 
 dnl OVS_GREP_IFELSE(FILE, REGEX, [IF-MATCH], [IF-NO-MATCH])
