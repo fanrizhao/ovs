@@ -734,6 +734,9 @@ extern const struct netdev_class netdev_linux_class;
 #endif
 extern const struct netdev_class netdev_internal_class;
 extern const struct netdev_class netdev_tap_class;
+#if defined(HAVE_BLUESWITCH)
+extern const struct netdev_class netdev_blueswitch_class;
+#endif
 
 #ifdef  __cplusplus
 }
