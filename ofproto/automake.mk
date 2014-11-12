@@ -52,6 +52,12 @@ ofproto_libofproto_la_SOURCES = \
 	ofproto/bundles.c \
 	ofproto/bundles.h
 
+if BLUESWITCH
+ofproto_libofproto_la_SOURCES += \
+	ofproto/ofproto-blueswitch.h \
+	ofproto/ofproto-blueswitch.c
+endif
+
 ofproto_libofproto_la_CPPFLAGS = $(AM_CPPFLAGS)
 ofproto_libofproto_la_CFLAGS = $(AM_CFLAGS)
 ofproto_libofproto_la_LIBADD = lib/libsflow.la
