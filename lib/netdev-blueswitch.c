@@ -24,6 +24,9 @@
 #include "netdev-provider.h"
 #include "vlog.h"
 
+#include "nf10_cfg.h"
+#include "bsw_cfg.h"
+
 VLOG_DEFINE_THIS_MODULE(netdev_blueswitch);
 
 struct netdev_blueswitch {
@@ -38,6 +41,10 @@ struct netdev_blueswitch {
     struct in_addr in4;
     struct in_addr netmask;
     struct in6_addr in6;
+
+    /* Blueswitch handle.  Currently supports only a single table switch. */
+    bs_info_t bsi;
+    tcam_cfg_t cfg;
 };
 
 static void netdev_blueswitch_run(void);
@@ -74,8 +81,10 @@ netdev_blueswitch_construct(struct netdev *netdev_)
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
 
     ovs_mutex_init(&netdev->mutex);
+    memcpy(&netdev->bsi, &bsw_1table, sizeof(netdev->bsi));
+    memcpy(&netdev->cfg, &bsw_cfg,    sizeof(netdev->cfg));
 
-    return 0;
+    return open_switch(&netdev->bsi);
 }
 
 static void
@@ -83,6 +92,7 @@ netdev_blueswitch_destruct(struct netdev *netdev_)
 {
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
 
+    close_switch(&netdev->bsi);
     ovs_mutex_destroy(&netdev->mutex);
 }
 
