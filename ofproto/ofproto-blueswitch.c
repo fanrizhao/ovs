@@ -40,6 +40,11 @@
 #include "ofproto/ofproto-provider.h"
 #include "nf10_cfg.h"
 
+#define SINGLE_TABLE
+#include "table_cfg.h"
+
+#define DATAPATH_TYPE "blueswitch"
+
 VLOG_DEFINE_THIS_MODULE(blueswitch);
 
 const struct ofproto_class ofproto_blueswitch_class;
@@ -47,6 +52,9 @@ const struct ofproto_class ofproto_blueswitch_class;
 struct ofproto_blueswitch {
     struct hmap_node all_ofproto_dpifs_node; /* In 'all_ofproto_dpifs'. */
     struct ofproto up;
+
+    /* top-level switch configuration */
+    struct bs_info *bs_info;
 };
 
 static inline struct ofproto_blueswitch *
@@ -63,11 +71,10 @@ init(const struct shash *iface_hints)
 {
     struct shash_node *node;
 
-    VLOG_WARN("[OFP-BS]:init:\n");
     SHASH_FOR_EACH(node, iface_hints) {
         const struct iface_hint *hint = node->data;
 
-        VLOG_WARN("  name:%s  type:%s  port:%d\n",
+        VLOG_WARN("iface_hint:  name:%s  type:%s  port:%d",
                   hint->br_name, hint->br_type, hint->ofp_port);
     }
 }
@@ -75,13 +82,14 @@ init(const struct shash *iface_hints)
 static void
 enumerate_types(struct sset *types)
 {
-    /* TODO */
-    struct shash_node *node;
+    VLOG_WARN("enumerate_types: adding %s:", DATAPATH_TYPE);
+    sset_add(types, DATAPATH_TYPE);
 }
 
 static int
 enumerate_names(const char *type, struct sset *names)
 {
+    VLOG_WARN("enumerate_names(type=%s):", type);
     /* TODO */
     return 0;
 }
@@ -89,7 +97,7 @@ enumerate_names(const char *type, struct sset *names)
 static const char *
 port_open_type(const char *datapath_type, const char *port_type)
 {
-    /* TODO */
+    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)", datapath_type, port_type);
     return NULL;
 }
 
@@ -98,7 +106,7 @@ port_open_type(const char *datapath_type, const char *port_type)
 static int
 del(const char *type, const char *name)
 {
-    /* TODO */
+    VLOG_WARN("del(type=%s,name=%s)", type, name);
     return -1;
 }
 
@@ -116,14 +124,27 @@ dealloc(struct ofproto *ofproto)
     free(ofp);
 }
 
+static int
+construct(struct ofproto *ofproto_)
+{
+    struct ofproto_blueswitch *ofproto = ofproto_blueswitch_cast(ofproto_);
+    ofproto->bs_info = &bsi_table;
+}
+
+static void
+destruct(struct ofproto *ofproto_)
+{
+    struct ofproto_blueswitch *ofproto = ofproto_blueswitch_cast(ofproto_);
+}
+
 const struct ofproto_class ofproto_blueswitch_class = {
     /* Factory Functions */
 
     .init = init,
-    .enumerate_types = NULL,
-    .enumerate_names = NULL,
-    .del = NULL,
-    .port_open_type = NULL,
+    .enumerate_types = enumerate_types,
+    .enumerate_names = enumerate_names,
+    .del = del,
+    .port_open_type = port_open_type,
 
     /* Top-Level type Functions */
 
@@ -133,10 +154,10 @@ const struct ofproto_class ofproto_blueswitch_class = {
     /* Top-level ofproto Functions */
 
     /* construction/destruction */
-    .alloc = NULL,
-    .construct = NULL,
-    .destruct = NULL,
-    .dealloc = NULL,
+    .alloc = alloc,
+    .construct = construct,
+    .destruct = destruct,
+    .dealloc = dealloc,
 
     .run = NULL,
     .wait = NULL,
