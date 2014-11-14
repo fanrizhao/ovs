@@ -60,6 +60,8 @@
 #include "vlog.h"
 #include "bundles.h"
 
+#include "ofproto-blueswitch.h"
+
 VLOG_DEFINE_THIS_MODULE(ofproto);
 
 COVERAGE_DEFINE(ofproto_flush);
@@ -333,6 +335,7 @@ ofproto_init(const struct shash *iface_hints)
     size_t i;
 
     ofproto_class_register(&ofproto_dpif_class);
+    ofproto_class_register(&ofproto_blueswitch_class);
 
     /* Make a local copy, since we don't own 'iface_hints' elements. */
     SHASH_FOR_EACH(node, iface_hints) {

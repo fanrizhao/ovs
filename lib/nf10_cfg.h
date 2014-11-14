@@ -1,1 +1,1 @@
-/home/mundkur/proj/ctsrd/blueswitch/trunk/tests/onetableswitch_cfgregs/nf10_cfg.h
+/home/mundkur/proj/ctsrd/blueswitch/trunk/driver/nf10_cfg.h
