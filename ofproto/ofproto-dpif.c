@@ -469,7 +469,7 @@ del(const char *type, const char *name)
 {
     struct dpif *dpif;
     int error;
-
+    VLOG_WARN("del(type:%s,name:%s)", type, name);
     error = dpif_open(name, type, &dpif);
     if (!error) {
         error = dpif_delete(dpif);
@@ -481,7 +481,10 @@ del(const char *type, const char *name)
 static const char *
 port_open_type(const char *datapath_type, const char *port_type)
 {
-    return dpif_port_open_type(datapath_type, port_type);
+    const char *pt = dpif_port_open_type(datapath_type, port_type);
+    VLOG_WARN("port_open_type(dp_type=%s, pt=%s) -> %s",
+              datapath_type, port_type, pt);
+    return pt;
 }
 
 /* Type functions. */

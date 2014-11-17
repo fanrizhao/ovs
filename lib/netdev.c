@@ -357,6 +357,8 @@ netdev_open(const char *name, const char *type, struct netdev **netdevp)
     struct netdev *netdev;
     int error;
 
+    VLOG_WARN("netdev_open(name=%s,type=%s)", name, type);
+
     netdev_initialize();
 
     ovs_mutex_lock(&netdev_class_mutex);
@@ -365,6 +367,7 @@ netdev_open(const char *name, const char *type, struct netdev **netdevp)
     if (!netdev) {
         struct netdev_registered_class *rc;
 
+        VLOG_WARN("trying to create netdev %s (type %s)", name, type);
         rc = netdev_lookup_class(type && type[0] ? type : "system");
         if (rc) {
             netdev = rc->class->alloc();

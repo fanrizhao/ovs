@@ -1715,6 +1715,8 @@ iface_do_create(const struct bridge *br,
         goto error;
     }
 
+    VLOG_WARN("opening netdev(if->name=%s, if->type=%s)",
+              iface_cfg->name, iface_get_type(iface_cfg, br->cfg));
     error = netdev_open(iface_cfg->name,
                         iface_get_type(iface_cfg, br->cfg), &netdev);
     if (error) {
@@ -3278,6 +3280,8 @@ bridge_del_ports(struct bridge *br, const struct shash *wanted_ports)
             struct iface *iface = iface_lookup(br, cfg->name);
             const char *type = iface_get_type(cfg, br->cfg);
 
+            VLOG_WARN("bridge_del_ports: processing br %s with cfg %s",
+                      br->name, cfg->name);
             if (iface) {
                 iface->cfg = cfg;
                 iface->type = type;

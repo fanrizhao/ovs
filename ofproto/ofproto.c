@@ -335,13 +335,17 @@ ofproto_init(const struct shash *iface_hints)
     size_t i;
 
     ofproto_class_register(&ofproto_dpif_class);
+#ifdef HAVE_BLUESWITCH
     ofproto_class_register(&ofproto_blueswitch_class);
-
+#endif
     /* Make a local copy, since we don't own 'iface_hints' elements. */
     SHASH_FOR_EACH(node, iface_hints) {
         const struct iface_hint *orig_hint = node->data;
         struct iface_hint *new_hint = xmalloc(sizeof *new_hint);
         const char *br_type = ofproto_normalize_type(orig_hint->br_type);
+
+        VLOG_WARN("ofproto_init: <- hint br:%s type:%s(%s) port:%d",
+                  orig_hint->br_name, br_type, orig_hint->br_type, orig_hint->ofp_port);
 
         new_hint->br_name = xstrdup(orig_hint->br_name);
         new_hint->br_type = xstrdup(br_type);
@@ -470,6 +474,8 @@ ofproto_create(const char *datapath_name, const char *datapath_type,
     struct ofproto *ofproto;
     int error;
     int i;
+
+    VLOG_WARN("trying to create datapath %s of type %s", datapath_name, datapath_type);
 
     *ofprotop = NULL;
 
@@ -1796,6 +1802,8 @@ ofproto_port_open_type(const char *datapath_type, const char *port_type)
     datapath_type = ofproto_normalize_type(datapath_type);
     class = ofproto_class_find__(datapath_type);
     if (!class) {
+        VLOG_WARN("ofproto_port_open_type(%s,%s): no class found",
+                  datapath_type, port_type);
         return port_type;
     }
 
@@ -1823,6 +1831,8 @@ ofproto_port_add(struct ofproto *ofproto, struct netdev *netdev,
     if (!error) {
         const char *netdev_name = netdev_get_name(netdev);
 
+        VLOG_WARN("ofproto_port_add: class added netdev %s (type %s)",
+                  netdev_name, netdev_get_type(netdev));
         simap_put(&ofproto->ofp_requests, netdev_name,
                   ofp_to_u16(ofp_port));
         update_port(ofproto, netdev_name);
@@ -2160,6 +2170,8 @@ ofport_open(struct ofproto *ofproto,
     struct netdev *netdev;
     int error;
 
+    VLOG_WARN("ofport_open: opening netdev name=%s type=%s",
+              ofproto_port->name, ofproto_port->type);
     error = netdev_open(ofproto_port->name, ofproto_port->type, &netdev);
     if (error) {
         VLOG_WARN_RL(&rl, "%s: ignoring port %s (%"PRIu16") because netdev %s "
