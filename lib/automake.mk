@@ -348,6 +348,7 @@ endif
 if BLUESWITCH
 lib_libopenvswitch_la_SOURCES += \
 	lib/bsw_cfg.h \
+	lib/nf10_config.h \
 	lib/nf10_cfg.h \
 	lib/lib_nf10_cfg.c \
 	lib/netdev-blueswitch.h \

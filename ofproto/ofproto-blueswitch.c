@@ -42,7 +42,7 @@
 #include "nf10_cfg.h"
 
 #define SINGLE_TABLE
-#include "table_cfg.h"
+#include "blueswitch_table_cfg.h"
 
 #define DATAPATH_TYPE "blueswitch"
 #define PORT_TYPE     "netfpga"

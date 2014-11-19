@@ -67,6 +67,7 @@ EXTRA_DIST = \
 	DESIGN.md \
 	FAQ.md \
 	INSTALL.md \
+	INSTALL.Blueswitch.md \
 	INSTALL.Debian.md \
 	INSTALL.Docker.md \
 	INSTALL.DPDK.md \
