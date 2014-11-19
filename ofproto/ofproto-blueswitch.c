@@ -37,6 +37,7 @@
 
 #include "shash.h"
 #include "vlog.h"
+#include "dpif.h"
 #include "ofproto/ofproto-provider.h"
 #include "nf10_cfg.h"
 
@@ -100,15 +101,6 @@ enumerate_names(const char *type, struct sset *names OVS_UNUSED)
     return 0;
 }
 
-static const char *
-port_open_type(const char *datapath_type, const char *port_type)
-{
-    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)", datapath_type, port_type);
-    return PORT_TYPE;
-}
-
-/* Type functions. */
-
 static int
 del(const char *type, const char *name)
 {
@@ -116,18 +108,20 @@ del(const char *type, const char *name)
     return -1;
 }
 
+static const char *
+port_open_type(const char *datapath_type, const char *port_type)
+{
+    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)", datapath_type, port_type);
+    return PORT_TYPE;
+}
+
+/* Top-level ofproto Functions */
+
 static struct ofproto *
 alloc(void)
 {
     struct ofproto_blueswitch *ofp = xmalloc(sizeof *ofp);
     return &ofp->up;
-}
-
-static void
-dealloc(struct ofproto *ofproto)
-{
-    struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
-    free(ofp);
 }
 
 static int
@@ -178,6 +172,39 @@ destruct(struct ofproto *ofproto)
 
     shash_destroy(&bswitch->ports_by_name);
 }
+
+static void
+dealloc(struct ofproto *ofproto)
+{
+    struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
+    free(ofp);
+}
+
+static int run(struct ofproto *ofproto)
+{
+     /* Performs any periodic activity required by 'ofproto'.  It should:
+     *
+     *   - Call connmgr_send_packet_in() for each received packet that missed
+     *     in the OpenFlow flow table or that had a OFPP_CONTROLLER output
+     *     action.
+     *
+     *   - Call ofproto_rule_expire() for each OpenFlow flow that has reached
+     *     its hard_timeout or idle_timeout, to expire the flow.
+     *
+     * Returns 0 if successful, otherwise a positive errno value. */
+    return 0;
+}
+
+static void wait(struct ofproto *ofproto)
+{
+    /* Causes the poll loop to wake up when 'ofproto''s 'run' function needs to
+     * be called, e.g. by calling the timer or fd waiting functions in
+     * poll-loop.h.  */
+    struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
+    (void) ofp;
+}
+
+/* ofport Functions */
 
 static struct ofport *
 port_alloc(void)
@@ -255,6 +282,8 @@ int port_get_stats(const struct ofport *port, struct netdev_stats *stats OVS_UNU
     return 0;
 }
 
+/* Port iteration functions */
+
 struct port_dump_state {
     int count;
 };
@@ -282,6 +311,87 @@ port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state)
     return 0;
 }
 
+/* OpenFlow Rule Functions */
+
+static enum ofperr
+rule_choose_table(const struct ofproto *ofproto OVS_UNUSED,
+                  const struct match *match OVS_UNUSED, uint8_t *table_idp)
+{
+    /* TODO: XXX: FIXME */
+    *table_idp = 0;
+    return 0;
+}
+
+struct rule_blueswitch {
+    struct rule up;
+
+    struct ovs_mutex stats_mutex;
+    struct dpif_flow_stats stats OVS_GUARDED;
+};
+
+static struct rule_blueswitch *rule_blueswitch_cast(const struct rule *rule)
+{
+    return rule ? CONTAINER_OF(rule, struct rule_blueswitch, up) : NULL;
+}
+
+static struct rule *
+rule_alloc(void) {
+    struct rule_blueswitch *rule = xmalloc(sizeof *rule);
+    return &rule->up;
+}
+
+static enum ofperr
+rule_construct(struct rule *rule_)
+    OVS_NO_THREAD_SAFETY_ANALYSIS
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    ovs_mutex_init_adaptive(&rule->stats_mutex);
+    rule->stats.n_packets = 0;
+    rule->stats.n_bytes = 0;
+    rule->stats.used = rule->up.modified;
+
+    return 0;
+}
+
+static enum ofperr rule_insert(struct rule *rule_)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    (void)rule;
+    return 0;
+}
+
+static void
+rule_delete(struct rule *rule_)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    (void)rule;
+}
+
+static void rule_destruct(struct rule *rule_)
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    ovs_mutex_destroy(&rule->stats_mutex);
+}
+
+static void rule_dealloc(struct rule *rule_)
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    free(rule);
+}
+
+static void rule_get_stats(struct rule *rule_, uint64_t *packet_count,
+                           uint64_t *byte_count, long long int *used)
+    OVS_EXCLUDED(ofproto_mutex)
+{
+    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    ovs_mutex_lock(&rule->stats_mutex);
+    *packet_count = rule->stats.n_packets;
+    *byte_count = rule->stats.n_bytes;
+    *used = rule->stats.used;
+    ovs_mutex_unlock(&rule->stats_mutex);
+}
 
 const struct ofproto_class ofproto_blueswitch_class = {
     /* Factory Functions */
@@ -305,8 +415,8 @@ const struct ofproto_class ofproto_blueswitch_class = {
     .destruct  = destruct,
     .dealloc   = dealloc,
 
-    .run = NULL,
-    .wait = NULL,
+    .run = run,
+    .wait = wait,
     .get_memory_usage = NULL,
     .type_get_memory_usage = NULL,
     .flush = NULL,
@@ -335,17 +445,17 @@ const struct ofproto_class ofproto_blueswitch_class = {
 
     /* OpenFlow Rule Functions */
 
-    .rule_choose_table = NULL,
+    .rule_choose_table = rule_choose_table,
 
     /* Rule lifecycle functions */
-    .rule_alloc = NULL,
-    .rule_construct = NULL,
-    .rule_insert = NULL,
-    .rule_delete = NULL,
-    .rule_destruct = NULL,
-    .rule_dealloc = NULL,
+    .rule_alloc = rule_alloc,
+    .rule_construct = rule_construct,
+    .rule_insert = rule_insert,
+    .rule_delete = rule_delete,
+    .rule_destruct = rule_destruct,
+    .rule_dealloc = rule_dealloc,
 
-    .rule_get_stats = NULL,
+    .rule_get_stats = rule_get_stats,
 
     .rule_execute = NULL,
     .rule_premodify_actions = NULL,
