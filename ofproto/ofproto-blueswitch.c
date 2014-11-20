@@ -111,7 +111,8 @@ del(const char *type, const char *name)
 static const char *
 port_open_type(const char *datapath_type, const char *port_type)
 {
-    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)", datapath_type, port_type);
+    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)",
+              datapath_type, port_type);
     return PORT_TYPE;
 }
 
@@ -234,10 +235,12 @@ static
 int port_query_by_name(const struct ofproto *ofproto,
                        const char *devname, struct ofproto_port *port)
 {
-    VLOG_WARN("port_query_by_name(ofp=%s, devname=%s)", ofproto->name, devname);
+    VLOG_WARN("port_query_by_name(ofp=%s, devname=%s)",
+              ofproto->name, devname);
 
-    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
-    struct ofproto_port *p = (struct ofproto_port *)shash_find_data(&bswitch->ports_by_name, devname);
+    struct ofproto_blueswitch *s = ofproto_blueswitch_cast(ofproto);
+    struct ofproto_port *p =
+        (struct ofproto_port *) shash_find_data(&s->ports_by_name, devname);
     if (!p) return 1;
 
     port->name = xstrdup(p->name);
@@ -259,7 +262,8 @@ int port_add(struct ofproto *ofproto, struct netdev *netdev)
 
     p->name     = xstrdup(netdev_get_name(netdev));
     p->type     = xstrdup(netdev_get_type(netdev));
-    p->ofp_port = !strcmp(ofproto->name, p->name) ? OFPP_LOCAL : bswitch->next_port++;
+    p->ofp_port = (!strcmp(ofproto->name, p->name)
+                   ? OFPP_LOCAL : bswitch->next_port++);
 
     shash_add(&bswitch->ports_by_name, p->name, p);
     return 0;
@@ -274,7 +278,8 @@ int port_del(struct ofproto *ofproto OVS_UNUSED, ofp_port_t ofp_port)
 }
 
 static
-int port_get_stats(const struct ofport *port, struct netdev_stats *stats OVS_UNUSED)
+int port_get_stats(const struct ofport *port,
+                   struct netdev_stats *stats OVS_UNUSED)
 {
     VLOG_WARN("port_get_stats: name:%s type:%s",
               netdev_get_name(port->netdev),

@@ -131,14 +131,16 @@ netdev_blueswitch_get_mtu(const struct netdev *netdev_, int *mtup OVS_UNUSED)
 }
 
 static int
-netdev_blueswitch_get_carrier(const struct netdev *netdev_, bool *carrier OVS_UNUSED)
+netdev_blueswitch_get_carrier(const struct netdev *netdev_,
+                              bool *carrier OVS_UNUSED)
 {
     VLOG_WARN("netdev_get_carrier(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
 static int
-netdev_blueswitch_get_stats(const struct netdev *netdev_, struct netdev_stats *stats OVS_UNUSED)
+netdev_blueswitch_get_stats(const struct netdev *netdev_,
+                            struct netdev_stats *stats OVS_UNUSED)
 {
     VLOG_WARN("netdev_get_stats(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
@@ -146,15 +148,19 @@ netdev_blueswitch_get_stats(const struct netdev *netdev_, struct netdev_stats *s
 
 static int
 netdev_blueswitch_get_features(const struct netdev *netdev_,
-                               enum netdev_features *current OVS_UNUSED, uint32_t *advertised OVS_UNUSED,
-                               enum netdev_features *supported OVS_UNUSED, uint32_t *peer OVS_UNUSED)
+                               enum netdev_features *current OVS_UNUSED,
+                               uint32_t *advertised OVS_UNUSED,
+                               enum netdev_features *supported OVS_UNUSED,
+                               uint32_t *peer OVS_UNUSED)
 {
-    VLOG_WARN("netdev_get_features(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("netdev_get_features(netdev(name=%s))",
+              netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
 static int
-netdev_blueswitch_get_in4(const struct netdev *netdev_, struct in_addr *in4 OVS_UNUSED,
+netdev_blueswitch_get_in4(const struct netdev *netdev_,
+                          struct in_addr *in4 OVS_UNUSED,
                           struct in_addr *netmask OVS_UNUSED)
 {
     VLOG_WARN("netdev_get_in4(netdev(name=%s))", netdev_get_name(netdev_));
@@ -162,17 +168,11 @@ netdev_blueswitch_get_in4(const struct netdev *netdev_, struct in_addr *in4 OVS_
 }
 
 static int
-netdev_blueswitch_set_in4(struct netdev *netdev_, struct in_addr addr OVS_UNUSED,
+netdev_blueswitch_set_in4(struct netdev *netdev_,
+                          struct in_addr addr OVS_UNUSED,
                           struct in_addr mask OVS_UNUSED)
 {
     VLOG_WARN("netdev_set_in4(netdev(name=%s))", netdev_get_name(netdev_));
-    return EOPNOTSUPP;
-}
-
-static int
-netdev_blueswitch_get_in6(const struct netdev *netdev_, struct in6_addr *in6 OVS_UNUSED)
-{
-    VLOG_WARN("netdev_get_in6(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -181,7 +181,8 @@ static int
 update_flags(struct netdev *netdev, enum netdev_flags off,
              enum netdev_flags on, enum netdev_flags *old_flags)
 {
-    VLOG_WARN("update_flags(netdev=%s): off=%d, on=%d", netdev_get_name(netdev), off, on);
+    VLOG_WARN("update_flags(netdev=%s): off=%d, on=%d",
+              netdev_get_name(netdev), off, on);
     *old_flags = NETDEV_UP;
     return 0;
 }
@@ -241,7 +242,7 @@ const struct netdev_class netdev_blueswitch_class =
 
     .get_in4                = netdev_blueswitch_get_in4,
     .set_in4                = netdev_blueswitch_set_in4,
-    .get_in6                = netdev_blueswitch_get_in6,
+    .get_in6                = NULL,
 
     .add_router             = NULL,
     .get_next_hop           = NULL,
