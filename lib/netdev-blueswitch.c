@@ -75,6 +75,12 @@ netdev_blueswitch_alloc(void)
     return &netdev->up;
 }
 
+static void netdev_blueswitch_dealloc(struct netdev *netdev_)
+{
+    struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
+    free(netdev);
+}
+
 static int
 netdev_blueswitch_construct(struct netdev *netdev_)
 {
@@ -182,15 +188,20 @@ update_flags(struct netdev *netdev, enum netdev_flags off,
 
 const struct netdev_class netdev_blueswitch_class =
 {
-    /* Choose a standard name later if possible. */
     .type                   = PORT_TYPE,
+
+    /* Top-Level Functions */
 
     .init                   = NULL,
     .run                    = netdev_blueswitch_run,
     .wait                   = NULL,
+
+    /* netdev Functions */
+
     .alloc                  = netdev_blueswitch_alloc,
     .construct              = netdev_blueswitch_construct,
     .destruct               = netdev_blueswitch_destruct,
+    .dealloc                = netdev_blueswitch_dealloc,
 
     .get_config             = NULL,
     .set_config             = NULL,
@@ -237,6 +248,8 @@ const struct netdev_class netdev_blueswitch_class =
     .get_status             = NULL,
     .arp_lookup             = NULL,
     .update_flags           = update_flags,
+
+    /* netdev_rxq Functions */
 
     .rxq_alloc              = NULL,
     .rxq_construct          = NULL,
