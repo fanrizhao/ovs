@@ -2177,6 +2177,8 @@ ofport_open(struct ofproto *ofproto,
             ofproto_port->ofp_port = alloc_ofp_port(ofproto,
                                                     ofproto_port->name);
         }
+    } else {
+        ofport_set_usage(ofproto, ofproto_port->ofp_port, LLONG_MAX);
     }
     pp->port_no = ofproto_port->ofp_port;
     netdev_get_etheraddr(netdev, pp->hw_addr);
