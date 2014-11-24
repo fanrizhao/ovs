@@ -89,14 +89,12 @@ init(const struct shash *iface_hints)
 static void
 enumerate_types(struct sset *types)
 {
-    VLOG_WARN("enumerate_types: adding %s:", DATAPATH_TYPE);
     sset_add(types, DATAPATH_TYPE);
 }
 
 static int
-enumerate_names(const char *type, struct sset *names OVS_UNUSED)
+enumerate_names(const char *type OVS_UNUSED, struct sset *names OVS_UNUSED)
 {
-    VLOG_WARN("enumerate_names(type=%s):", type);
     /* TODO */
     return 0;
 }
@@ -320,8 +318,10 @@ port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state)
 
 static enum ofperr
 rule_choose_table(const struct ofproto *ofproto OVS_UNUSED,
-                  const struct match *match OVS_UNUSED, uint8_t *table_idp)
+                  const struct match *match, uint8_t *table_idp)
 {
+    VLOG_WARN("rule_choose_table: match=%s",
+              match_to_string(match, OFP_DEFAULT_PRIORITY));
     /* TODO: XXX: FIXME */
     *table_idp = 0;
     return 0;

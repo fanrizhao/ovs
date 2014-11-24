@@ -139,10 +139,9 @@ netdev_blueswitch_get_carrier(const struct netdev *netdev_,
 }
 
 static int
-netdev_blueswitch_get_stats(const struct netdev *netdev_,
+netdev_blueswitch_get_stats(const struct netdev *netdev_ OVS_UNUSED,
                             struct netdev_stats *stats OVS_UNUSED)
 {
-    VLOG_WARN("netdev_get_stats(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
