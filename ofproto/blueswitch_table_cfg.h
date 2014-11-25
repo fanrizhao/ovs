@@ -40,6 +40,24 @@
 #define TCAM_BASE_OFFSET    (36 * 4)
 #define PIPE_BASE_OFFSET    ((36 + 46) * 4)
 
+#ifdef BLUESWITCH_OVS_CONFIG
+/* Supported instructions */
+#define BLUESWITCH_INSTRUCTIONS             \
+  ( (1u << OVSINST_OFPIT11_APPLY_ACTIONS)   \
+  | (1u << OVSINST_OFPIT11_WRITE_ACTIONS)   \
+  | (1u << OVSINST_OFPIT11_CLEAR_ACTIONS)   \
+  | (1u << OVSINST_OFPIT11_GOTO_TABLE)      \
+  )
+
+/* Supported actions */
+#define BLUESWITCH_ACTIONS                  \
+  ( (UINT64_C(1) << OFPACT_OUTPUT)          \
+  | (UINT64_C(1) << OFPACT_CLEAR_ACTIONS)   \
+  | (UINT64_C(1) << OFPACT_WRITE_ACTIONS)   \
+  | (UINT64_C(1) << OFPACT_GOTO_TABLE)      \
+  )
+#endif
+
 bs_info_t bsi_table = {
   .dev                  = -1,
   .device_base_addr     = DEVICE_BASE_ADDR,
@@ -51,7 +69,37 @@ bs_info_t bsi_table = {
     { .base_addr        = DEVICE_BASE_ADDR + TCAM_BASE_OFFSET,
       .num_entries      = 10,  /* NumEntries in OneTableRegsSwitchPipeline */
       .key_size         = 1,
-      .val_size         = 19 }
+      .val_size         = 19,
+#ifdef BLUESWITCH_OVS_CONFIG
+      .features = {
+        .table_id = 0,
+        .metadata_match = 0,
+        .metadata_write = 0,
+        .miss_config    = OFPUTIL_TABLE_MISS_DROP,
+        .max_entries    = 0,         /* REDUNDANT: use num_entries above */
+        .nonmiss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+        .miss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+      },
+      .num_fields = 1,
+      .mf_fields  = { [0] = MFF_IPV4_SRC },
+#endif
+    }
   }
 };
 
@@ -87,15 +135,107 @@ bs_info_t bsi_table = {
     { .base_addr          = DEVICE_BASE_ADDR + TCAM_BASE_OFFSET,
       .num_entries        = 10,
       .key_size           = 1,
-      .val_size           = 19 },
+      .val_size           = 19,
+#ifdef BLUESWITCH_OVS_CONFIG
+      .features = {
+        .table_id = 0,
+        .metadata_match = 0,
+        .metadata_write = 0,
+        .miss_config    = OFPUTIL_TABLE_MISS_CONTINUE,
+        .max_entries    = 0,         /* REDUNDANT: use num_entries above */
+        .nonmiss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+        .miss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+        .num_fields = 2,
+        .mf_fields  = { [0] = MFF_TCP_SRC,
+                        [1] = MFF_TCP_DST },
+        },
+      }
+#endif
+    },
     { .base_addr          = DEVICE_BASE_ADDR + TCAM_BASE_OFFSET + 46,
       .num_entries        = 10,
       .key_size           = 1,
-      .val_size           = 19 },
+      .val_size           = 19,
+#ifdef BLUESWITCH_OVS_CONFIG
+      .features = {
+        .table_id = 1,
+        .metadata_match = 0,
+        .metadata_write = 0,
+        .miss_config    = OFPUTIL_TABLE_MISS_CONTINUE,
+        .max_entries    = 0,         /* REDUNDANT: use num_entries above */
+        .nonmiss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+        .miss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+      },
+      .num_fields = 1,
+      .mf_fields  = { [0] = MFF_IPV4_DST },
+#endif
+    },
     { .base_addr          = DEVICE_BASE_ADDR + TCAM_BASE_OFFSET + 46 + 46,
       .num_entries        = 10,
       .key_size           = 2,
-      .val_size           = 19 }
+      .val_size           = 19,
+#ifdef BLUESWITCH_OVS_CONFIG
+      .features = {
+        .table_id = 2,
+        .metadata_match = 0,
+        .metadata_write = 0,
+        .miss_config    = OFPUTIL_TABLE_MISS_DROP,
+        .max_entries    = 0,         /* REDUNDANT: use num_entries above */
+        .nonmiss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+        .miss = {
+          .instructions = BLUESWITCH_INSTRUCTIONS,
+          .write = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+          .apply = {
+            .ofpacts    = BLUESWITCH_ACTIONS
+          },
+        },
+      },
+      .num_fields = 1,
+      .mf_fields  = { [0] = MFF_ETH_DST },
+#endif
+    }
   }
 };
 #endif // MULTI_TABLE

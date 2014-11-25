@@ -36,6 +36,11 @@
 
 #include <stdint.h>
 
+/* Specify tcams as OvS tables if in OvS context. */
+#ifdef BLUESWITCH_OVS_CONFIG
+#include "ofp-util.h"
+#endif
+
 /** Device interface **/
 
 #define DEVICE_FILE         "/dev/nf10"
@@ -224,6 +229,13 @@ typedef struct tcam_info {
   uint16_t num_entries;
   uint32_t key_size;
   uint32_t val_size;
+
+#ifdef BLUESWITCH_OVS_CONFIG
+#define BLUESWITCH_MAX_TCAM_FIELDS 2
+  struct ofputil_table_features features;
+  uint32_t                      num_fields;
+  enum mf_field_id              mf_fields[BLUESWITCH_MAX_TCAM_FIELDS];
+#endif
 } tcam_info_t;
 
 typedef struct bs_info {

@@ -38,10 +38,12 @@
 #include "shash.h"
 #include "vlog.h"
 #include "dpif.h"
+#include "meta-flow.h"
 #include "ofproto/ofproto-provider.h"
-#include "nf10_cfg.h"
 
+#define BLUESWITCH_OVS_CONFIG
 #define SINGLE_TABLE
+#include "nf10_cfg.h"
 #include "blueswitch_table_cfg.h"
 
 #define DATAPATH_TYPE "blueswitch"
@@ -179,7 +181,8 @@ dealloc(struct ofproto *ofproto)
     free(ofp);
 }
 
-static int run(struct ofproto *ofproto)
+static int
+run(struct ofproto *ofproto OVS_UNUSED)
 {
      /* Performs any periodic activity required by 'ofproto'.  It should:
      *
@@ -194,13 +197,51 @@ static int run(struct ofproto *ofproto)
     return 0;
 }
 
-static void wait(struct ofproto *ofproto)
+static void
+wait(struct ofproto *ofproto)
 {
     /* Causes the poll loop to wake up when 'ofproto''s 'run' function needs to
      * be called, e.g. by calling the timer or fd waiting functions in
      * poll-loop.h.  */
     struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
     (void) ofp;
+}
+
+/* Table features */
+
+static void
+query_tables(struct ofproto *ofproto,
+             struct ofputil_table_features *features,
+             struct ofputil_table_stats *stats OVS_UNUSED)
+{
+    struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
+    struct bs_info *bsi = ofp->bs_info;
+    ovs_assert(ofproto->n_tables == bsi->num_tcams);
+    for (int i = 0; i < ofproto->n_tables; i++) {
+        struct tcam_info *tci = &bsi->tcams[i];
+        struct ofputil_table_features *f = &features[i];
+        f->metadata_match = tci->features.metadata_match;
+        f->metadata_write = tci->features.metadata_write;
+        f->miss_config    = tci->features.miss_config;
+        f->max_entries    = tci->num_entries;
+
+        /* Inherit the default .next for nonmiss and miss. */
+        f->nonmiss.instructions = tci->features.nonmiss.instructions;
+        f->miss.instructions    = tci->features.miss.instructions;
+        f->nonmiss.write        = tci->features.nonmiss.write;
+        f->miss.write           = tci->features.miss.write;
+        f->nonmiss.apply        = tci->features.nonmiss.apply;
+        f->miss.apply           = tci->features.miss.apply;
+
+        ovs_assert(tci->num_fields < BLUESWITCH_MAX_TCAM_FIELDS);
+        /* All Blueswitch tcam fields are matchable, maskable, and
+         * wildcardable. */
+        struct mf_bitmap fields = MF_BITMAP_INITIALIZER;
+        for (int j = 0; j < tci->num_fields; j++) {
+            bitmap_set1(fields.bm, tci->mf_fields[j]);
+        }
+        f->match = f->mask = f->wildcard = fields;
+    }
 }
 
 /* ofport Functions */
@@ -229,9 +270,9 @@ port_dealloc(struct ofport *ofport)
     free(ofport);
 }
 
-static
-int port_query_by_name(const struct ofproto *ofproto,
-                       const char *devname, struct ofproto_port *port)
+static int
+port_query_by_name(const struct ofproto *ofproto,
+                   const char *devname, struct ofproto_port *port)
 {
     VLOG_WARN("port_query_by_name(ofp=%s, devname=%s)",
               ofproto->name, devname);
@@ -248,8 +289,8 @@ int port_query_by_name(const struct ofproto *ofproto,
     return 0;
 }
 
-static
-int port_add(struct ofproto *ofproto, struct netdev *netdev)
+static int
+port_add(struct ofproto *ofproto, struct netdev *netdev)
 {
     VLOG_WARN("port_add: adding netdev %s of type %s",
               netdev_get_name(netdev), netdev_get_type(netdev));
@@ -267,16 +308,16 @@ int port_add(struct ofproto *ofproto, struct netdev *netdev)
     return 0;
 }
 
-static
-int port_del(struct ofproto *ofproto OVS_UNUSED, ofp_port_t ofp_port)
+static int
+port_del(struct ofproto *ofproto OVS_UNUSED, ofp_port_t ofp_port)
 {
     VLOG_WARN("port_add: deleting port %d", ofp_port);
     /* TODO */
     return 0;
 }
 
-static
-int port_get_stats(const struct ofport *port,
+static int
+port_get_stats(const struct ofport *port,
                    struct netdev_stats *stats OVS_UNUSED)
 {
     VLOG_WARN("port_get_stats: name:%s type:%s",
@@ -358,7 +399,8 @@ rule_construct(struct rule *rule_)
     return 0;
 }
 
-static enum ofperr rule_insert(struct rule *rule_)
+static enum ofperr
+rule_insert(struct rule *rule_)
     OVS_REQUIRES(ofproto_mutex)
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
@@ -374,20 +416,23 @@ rule_delete(struct rule *rule_)
     (void)rule;
 }
 
-static void rule_destruct(struct rule *rule_)
+static void
+rule_destruct(struct rule *rule_)
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
     ovs_mutex_destroy(&rule->stats_mutex);
 }
 
-static void rule_dealloc(struct rule *rule_)
+static void
+rule_dealloc(struct rule *rule_)
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
     free(rule);
 }
 
-static void rule_get_stats(struct rule *rule_, uint64_t *packet_count,
-                           uint64_t *byte_count, long long int *used)
+static void
+rule_get_stats(struct rule *rule_, uint64_t *packet_count,
+               uint64_t *byte_count, long long int *used)
     OVS_EXCLUDED(ofproto_mutex)
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
@@ -425,6 +470,9 @@ const struct ofproto_class ofproto_blueswitch_class = {
     .get_memory_usage = NULL,
     .type_get_memory_usage = NULL,
     .flush = NULL,
+
+    /* Table Features */
+    .query_tables       = query_tables,
 
     /* ofport Functions */
 
