@@ -387,13 +387,19 @@ port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state_)
 
 static enum ofperr
 rule_choose_table(const struct ofproto *ofproto OVS_UNUSED,
-                  const struct match *match, uint8_t *table_idp)
+                  const struct match *match OVS_UNUSED,
+                  uint8_t *table_idp OVS_UNUSED)
 {
     VLOG_WARN("rule_choose_table: match=%s",
               match_to_string(match, OFP_DEFAULT_PRIORITY));
-    /* TODO: XXX: FIXME */
-    *table_idp = 0;
-    return 0;
+
+    /* TODO: Convert the features supported by the tcams into the match form.
+       Then compare that match to the one provided in order to select the table.
+
+       In effect, we currently only support controllers that can explicitly
+       specify the table for each rule.
+    */
+    return OFPERR_OFPFMFC_BAD_TABLE_ID;
 }
 
 struct rule_blueswitch {
