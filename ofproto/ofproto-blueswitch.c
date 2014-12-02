@@ -309,10 +309,21 @@ port_add(struct ofproto *ofproto, struct netdev *netdev)
 }
 
 static int
-port_del(struct ofproto *ofproto OVS_UNUSED, ofp_port_t ofp_port)
+port_del(struct ofproto *ofproto, ofp_port_t ofp_port)
 {
-    VLOG_WARN("port_add: deleting port %d", ofp_port);
-    /* TODO */
+    VLOG_WARN("port_del: deleting port %d", ofp_port);
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
+
+    struct shash_node *node, *next;
+    SHASH_FOR_EACH_SAFE(node, next, &bswitch->ports_by_name) {
+        struct ofproto_port *p = node->data;
+        if (p->ofp_port == ofp_port) {
+            free(p->name);
+            free(p->type);
+            free(p);
+            shash_delete(&bswitch->ports_by_name, node);
+        }
+    }
     return 0;
 }
 
@@ -329,28 +340,45 @@ port_get_stats(const struct ofport *port,
 /* Port iteration functions */
 
 struct port_dump_state {
+    struct hmap_node *next;
     int count;
 };
 
 static int
-port_dump_start(const struct ofproto *ofproto OVS_UNUSED, void **statep)
+port_dump_start(const struct ofproto *ofproto, void **statep)
 {
-    *statep = xzalloc(sizeof(struct port_dump_state));
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
+    struct port_dump_state *state = xzalloc(sizeof(struct port_dump_state));
+    state->next = hmap_first(&bswitch->ports_by_name.map);
+    *statep = state;
     return 0;
 }
 
 static int
-port_dump_next(const struct ofproto *ofproto OVS_UNUSED, void *state_,
-               struct ofproto_port *port OVS_UNUSED)
+port_dump_next(const struct ofproto *ofproto, void *state_,
+               struct ofproto_port *port)
 {
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
     struct port_dump_state *state = state_;
     VLOG_WARN("port_dump_next(%d)", state->count);
-    return EOF;
+    if (state->next == NULL) {
+        return EOF;
+    }
+
+    struct shash_node *node = CONTAINER_OF(state->next, struct shash_node, node);
+    struct ofproto_port *p = node->data;
+    /* We retain ownership of p's fields, according ofproto-provider API. */
+    *port = *p;
+
+    state->next = hmap_next(&bswitch->ports_by_name.map, state->next);
+    state->count++;
+    return 0;
 }
 
 static int
-port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state)
+port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state_)
 {
+    struct port_dump_state *state = state_;
     free(state);
     return 0;
 }
