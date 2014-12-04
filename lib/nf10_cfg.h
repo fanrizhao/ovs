@@ -29,6 +29,9 @@
  * SUCH DAMAGE.
  */
 
+#ifndef NF10_CFG_H
+#define NF10_CFG_H
+
 /* This file contains a simple program to configure the single table
    switch in this directory with the same test configuration as the
    one used in simulation, but using the register interface.
@@ -258,3 +261,5 @@ void activate_pipeline(bs_info_t *bsi);
 
 int open_switch(bs_info_t *bsi);
 void close_switch(bs_info_t *bsi);
+
+#endif /* NF10_CFG_H */
