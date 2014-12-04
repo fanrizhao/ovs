@@ -17,26 +17,29 @@
 #ifndef BLUESWITCH_UTIL_H
 #define BLUESWITCH_UTIL_H
 
+#define BLUESWITCH_OVS_CONFIG
 #include "nf10_cfg.h"
 #include "ofproto/ofproto-provider.h"
 
 #define BLUESWITCH_MAX_TCAM_KEYLEN      4      /* in 32-bit words */
 
 struct bsw_tcam_key {
-  uint32_t key_buf[BLUESWITCH_MAX_TCAM_KEYLEN];
-  uint32_t msk_buf[BLUESWITCH_MAX_TCAM_KEYLEN];
+  uint8_t key_buf[4 * BLUESWITCH_MAX_TCAM_KEYLEN];
+  uint8_t msk_buf[4 * BLUESWITCH_MAX_TCAM_KEYLEN];
   uint32_t n_valid_bytes;
 };
 
 /* Extract the key/mask/value fields for a Blueswitch TCAM with configuration
-   'tcam' into 'key' from the OvS 'match'. */
+   'tcam' into 'key' from the OvS 'match'.  This overwrites any earlier
+   information in 'key'.*/
 
 int bsw_extract_tcam_key(const struct tcam_info *tcam,
                          const struct match *match,
                          struct bsw_tcam_key *key);
 
 /* Extract the match-action instruction-set for a Blueswitch match-table with
-   configuration 'tcam' into 'key' from the OvS 'actions'. */
+   configuration 'tcam' into 'key' from the OvS 'actions'.  This overwrites any
+   earlier information in 'instr'. */
 
 int bsw_extract_instruction(const struct tcam_info *tcam,
                             const struct rule_actions *actions,
