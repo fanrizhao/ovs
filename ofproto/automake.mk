@@ -55,6 +55,8 @@ ofproto_libofproto_la_SOURCES = \
 if BLUESWITCH
 ofproto_libofproto_la_SOURCES += \
 	ofproto/blueswitch_table_cfg.h \
+	ofproto/blueswitch-util.h \
+	ofproto/blueswitch-util.c \
 	ofproto/ofproto-blueswitch.h \
 	ofproto/ofproto-blueswitch.c
 endif
