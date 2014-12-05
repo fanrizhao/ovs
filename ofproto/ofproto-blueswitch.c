@@ -35,11 +35,11 @@
 #include <errno.h>
 #include <config.h>
 
-#include "shash.h"
 #include "vlog.h"
 #include "dpif.h"
-#include "meta-flow.h"
 #include "ofproto/ofproto-provider.h"
+
+#include "blueswitch-util.h"
 
 #define BLUESWITCH_OVS_CONFIG
 #define SINGLE_TABLE
@@ -434,12 +434,40 @@ rule_construct(struct rule *rule_)
 }
 
 static enum ofperr
-rule_insert(struct rule *rule_)
+rule_insert(struct rule *rule)
     OVS_REQUIRES(ofproto_mutex)
 {
-    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
-    (void)rule;
-    return 0;
+    ovs_mutex_lock(&rule->mutex);
+
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
+    struct bs_info *bsi = bswitch->bs_info;
+    ovs_assert(rule->table_id < bsi->num_tcams);
+    const struct tcam_info *tcam = &bsi->tcams[rule->table_id];
+
+    /* Expand the compressed minimatch.  We can't directly use the compressed
+       match, since the Blueswitch tables might use fields in a different order
+       from the canonical order in minimatch.
+    */
+    struct match match;
+    minimatch_expand(&rule->cr.match, &match);
+
+    enum ofperr ret;
+    struct bsw_tcam_key key;
+    struct instr_encoding instr;
+
+    ret = bsw_extract_tcam_key(tcam, &match, &key);
+    if (ret) goto error;
+
+    ret = bsw_extract_instruction(tcam, rule_get_actions(rule), &instr);
+    if (ret) goto error;
+
+    /* XXX: TODO: Now program the darn switch.  Need to allocate an index for
+     * the rule.
+     */
+
+error:
+    ovs_mutex_unlock(&rule->mutex);
+    return ret;
 }
 
 static void
