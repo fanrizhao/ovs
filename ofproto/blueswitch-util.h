@@ -33,16 +33,16 @@ struct bsw_tcam_key {
    'tcam' into 'key' from the OvS 'match'.  This overwrites any earlier
    information in 'key'.*/
 
-int bsw_extract_tcam_key(const struct tcam_info *tcam,
-                         const struct match *match,
-                         struct bsw_tcam_key *key);
+enum ofperr bsw_extract_tcam_key(const struct tcam_info *tcam,
+				 const struct match *match,
+				 struct bsw_tcam_key *key);
 
 /* Extract the match-action instruction-set for a Blueswitch match-table with
    configuration 'tcam' into 'key' from the OvS 'actions'.  This overwrites any
    earlier information in 'instr'. */
 
-int bsw_extract_instruction(const struct tcam_info *tcam,
-                            const struct rule_actions *actions,
-                            struct instr_encoding *instr);
+enum ofperr bsw_extract_instruction(const struct tcam_info *tcam,
+				    const struct rule_actions *actions,
+				    struct instr_encoding *instr);
 
 #endif /* BLUESWITCH_UTIL_H */

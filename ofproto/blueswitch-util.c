@@ -29,7 +29,7 @@ bsw_tcam_key_init(struct bsw_tcam_key *key)
     memset(key, 0, sizeof *key);
 }
 
-int
+enum ofperr
 bsw_extract_tcam_key(const struct tcam_info *tcam,
                      const struct match *match,
                      struct bsw_tcam_key *key)
@@ -45,11 +45,7 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         /* Ensure there is sufficient space. */
         enum mf_field_id id = tcam->mf_fields[i];
         const struct mf_field *f = mf_from_id(id);
-        if (key->n_valid_bytes + f->n_bytes >= 4 * tcam->key_size) {
-            VLOG_ERR("%s: insufficient space to extract tcam key for %s",
-                     __func__, f->name);
-            return -1;
-        }
+        ovs_assert(key->n_valid_bytes + f->n_bytes <= 4 * tcam->key_size);
 
         /* TODO: XXX: Check endianness of all fields! */
 
@@ -127,7 +123,6 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
             *cursor = match->wc.masks.tp_dst;
 
             key->n_valid_bytes += f->n_bytes;
-
         }
         break;
 
@@ -190,6 +185,7 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         case MFF_ICMPV6_CODE:
 
         case MFF_TCP_FLAGS:
+            return OFPERR_OFPBMC_BAD_FIELD;
 
         case MFF_N_IDS:
         default:
@@ -205,7 +201,7 @@ struct instr_cursor {
     uint32_t next_write_action;
 };
 
-static int
+static enum ofperr
 bsw_extract_action(const struct ofpact *act,
                    struct instr_encoding *instr,
                    struct instr_cursor *cursor,
@@ -218,14 +214,14 @@ bsw_extract_action(const struct ofpact *act,
         if (cursor->next_write_action >= NUM_WRITE_ACTIONS) {                   \
             VLOG_ERR("%s: write action buffer overflow when processing %s",     \
                      __func__, ofpact_name(act->type));                         \
-            return -1;                                                          \
+            return OFPERR_OFPBAC_TOO_MANY;                                      \
         }                                                                       \
         instr->write_actions[cursor->next_write_action++] = a;                  \
     } else {                                                                    \
         if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {                   \
             VLOG_ERR("%s: apply action buffer overflow when processing %s",     \
                      __func__, ofpact_name(act->type));                         \
-            return -1;                                                          \
+            return OFPERR_OFPBAC_TOO_MANY;                                      \
         }                                                                       \
         instr->apply_actions[cursor->next_apply_action++] = a;                  \
     }                                                                           \
@@ -239,7 +235,7 @@ bsw_extract_action(const struct ofpact *act,
         if (instr->flags & INSTR_GOTOTABLE) {
             VLOG_ERR("%s: repeated Goto-Table detected! (already set to %d)",
                      __func__, instr->table_id);
-            return -1;
+            return OFPERR_OFPBIC_UNSUP_INST;
         }
         instr->flags |= INSTR_GOTOTABLE;
         instr->table_id = gt->table_id;
@@ -267,7 +263,7 @@ bsw_extract_action(const struct ofpact *act,
         if (meta->mask >> 32) {
             VLOG_ERR("%s: Blueswitch only supports 32-bit metadata (asked for mask of %"PRIu64")",
                      __func__,  meta->mask);
-            return -1;
+            return OFPERR_OFPBIC_UNSUP_METADATA_MASK;
         }
         instr->metadata_value = (uint32_t) meta->metadata;
         instr->metadata_mask  = (uint32_t) meta->mask;
@@ -315,7 +311,7 @@ bsw_extract_action(const struct ofpact *act,
     case OFPACT_STACK_PUSH:
     case OFPACT_STRIP_VLAN:
         VLOG_ERR("%s: unsupported action %s", __func__, ofpact_name(act->type));
-        return -1;
+        return OFPERR_OFPBIC_UNSUP_INST;
 
     case OFPACT_WRITE_ACTIONS:
         OVS_NOT_REACHED();
@@ -327,7 +323,7 @@ bsw_extract_action(const struct ofpact *act,
 /* Extract the match-action instruction-set for a Blueswitch match-table with
    configuration 'tcam' into 'key' from the OvS 'rule'. */
 
-int
+enum ofperr
 bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
                         const struct rule_actions *actions,
                         struct instr_encoding *instr)
