@@ -200,13 +200,169 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
     return 0;
 }
 
+struct instr_cursor {
+    uint32_t next_apply_action;
+    uint32_t next_write_action;
+};
+
+static int
+bsw_extract_action(const struct ofpact *act,
+                   struct instr_encoding *instr,
+                   struct instr_cursor *cursor,
+                   bool as_write_action)
+{
+
+#define ADD_ACTION(a) \
+  do {                                                                          \
+    if (as_write_action) {                                                      \
+        if (cursor->next_write_action >= NUM_WRITE_ACTIONS) {                   \
+            VLOG_ERR("%s: write action buffer overflow when processing %s",     \
+                     __func__, ofpact_name(act->type));                         \
+            return -1;                                                          \
+        }                                                                       \
+        instr->write_actions[cursor->next_write_action++] = a;                  \
+    } else {                                                                    \
+        if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {                   \
+            VLOG_ERR("%s: apply action buffer overflow when processing %s",     \
+                     __func__, ofpact_name(act->type));                         \
+            return -1;                                                          \
+        }                                                                       \
+        instr->apply_actions[cursor->next_apply_action++] = a;                  \
+    }                                                                           \
+  } while (0)
+
+    switch (act->type) {
+    case OFPACT_GOTO_TABLE:
+    {
+        struct ofpact_goto_table *gt = ofpact_get_GOTO_TABLE(act);
+
+        if (instr->flags & INSTR_GOTOTABLE) {
+            VLOG_ERR("%s: repeated Goto-Table detected! (already set to %d)",
+                     __func__, instr->table_id);
+            return -1;
+        }
+        instr->flags |= INSTR_GOTOTABLE;
+        instr->table_id = gt->table_id;
+    }
+    break;
+
+    case OFPACT_CLEAR_ACTIONS:
+        instr->flags |= INSTR_CLEARACTIONS;
+        break;
+
+    case OFPACT_OUTPUT:
+    {
+        struct ofpact_output *out = ofpact_get_OUTPUT(act);
+
+        /* TODO: check port-mapping with ofproto layer */
+        action_encoding_t a = make_output_action(PORT_NORMAL, out->port);
+
+        ADD_ACTION(a);
+    }
+    break;
+
+    case OFPACT_WRITE_METADATA:
+    {
+        struct ofpact_metadata *meta = ofpact_get_WRITE_METADATA(act);
+        if (meta->mask >> 32) {
+            VLOG_ERR("%s: Blueswitch only supports 32-bit metadata (asked for mask of %"PRIu64")",
+                     __func__,  meta->mask);
+            return -1;
+        }
+        instr->metadata_value = (uint32_t) meta->metadata;
+        instr->metadata_mask  = (uint32_t) meta->mask;
+        instr->flags         |= INSTR_SETMETADATA;
+    } break;
+
+    case OFPACT_SET_FIELD:
+    case OFPACT_REG_MOVE:
+    case OFPACT_SET_ETH_DST:
+    case OFPACT_SET_ETH_SRC:
+    case OFPACT_SET_IP_DSCP:
+    case OFPACT_SET_IP_ECN:
+    case OFPACT_SET_IP_TTL:
+    case OFPACT_SET_IPV4_DST:
+    case OFPACT_SET_IPV4_SRC:
+    case OFPACT_SET_L4_DST_PORT:
+    case OFPACT_SET_L4_SRC_PORT:
+    case OFPACT_SET_MPLS_LABEL:
+    case OFPACT_SET_MPLS_TC:
+    case OFPACT_SET_MPLS_TTL:
+    case OFPACT_SET_QUEUE:
+    case OFPACT_SET_TUNNEL:
+    case OFPACT_SET_VLAN_PCP:
+    case OFPACT_SET_VLAN_VID:
+    case OFPACT_BUNDLE:
+    case OFPACT_CONTROLLER:
+    case OFPACT_DEC_MPLS_TTL:
+    case OFPACT_DEC_TTL:
+    case OFPACT_ENQUEUE:
+    case OFPACT_EXIT:
+    case OFPACT_FIN_TIMEOUT:
+    case OFPACT_GROUP:
+    case OFPACT_LEARN:
+    case OFPACT_METER:
+    case OFPACT_MULTIPATH:
+    case OFPACT_NOTE:
+    case OFPACT_OUTPUT_REG:
+    case OFPACT_POP_MPLS:
+    case OFPACT_POP_QUEUE:
+    case OFPACT_PUSH_MPLS:
+    case OFPACT_PUSH_VLAN:
+    case OFPACT_RESUBMIT:
+    case OFPACT_SAMPLE:
+    case OFPACT_STACK_POP:
+    case OFPACT_STACK_PUSH:
+    case OFPACT_STRIP_VLAN:
+        VLOG_ERR("%s: unsupported action %s", __func__, ofpact_name(act->type));
+        return -1;
+
+    case OFPACT_WRITE_ACTIONS:
+        OVS_NOT_REACHED();
+    }
+
+    return 0;
+}
+
 /* Extract the match-action instruction-set for a Blueswitch match-table with
    configuration 'tcam' into 'key' from the OvS 'rule'. */
 
 int
 bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
-                        const struct rule_actions *actions OVS_UNUSED,
-                        struct instr_encoding *instr OVS_UNUSED)
+                        const struct rule_actions *actions,
+                        struct instr_encoding *instr)
 {
-    return 0;
+    const struct ofpact *act;
+    struct instr_cursor cursor;
+    memset(&cursor, 0, sizeof(struct instr_cursor));
+
+    memset(instr, 0, sizeof *instr);
+
+    for (act = actions->ofpacts;
+         act < ofpact_end(actions->ofpacts, actions->ofpacts_len);
+         act = ofpact_next(act)) {
+
+        /* OvS uses nested actions for Write-Actions, so process that
+         * separately.
+         */
+        if (act->type == OFPACT_WRITE_ACTIONS) {
+            struct ofpact_nest *nest = ofpact_get_WRITE_ACTIONS(act);
+            size_t nest_action_len = ofpact_nest_get_action_len(nest);
+            const struct ofpact *nact;
+
+            for (nact = nest->actions;
+                 nact < ofpact_end(nest->actions, nest_action_len);
+                 nact = ofpact_next(nact)) {
+
+                if (!bsw_extract_action(nact, instr, &cursor, true))
+                    return -1;
+            }
+        } else {
+            /* Process this as in an Apply-Action instruction. */
+            if (!bsw_extract_action(act, instr, &cursor, false))
+                return -1;
+        }
+    }
+
+   return 0;
 }

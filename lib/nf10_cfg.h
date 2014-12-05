@@ -212,7 +212,7 @@ typedef struct __attribute__ ((__packed__)) instr_encoding {
   uint32_t  metadata_value;
   uint32_t  metadata_mask;
 
-  action_encoding_t apply_actions[NUM_WRITE_ACTIONS];
+  action_encoding_t apply_actions[NUM_APPLY_ACTIONS];
   action_encoding_t write_actions[NUM_WRITE_ACTIONS];
 } instr_encoding_t;
 /* assert(sizeof(instr_encoding_t) == 4 * 19) */
