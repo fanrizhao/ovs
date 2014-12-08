@@ -328,6 +328,7 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
                         const struct rule_actions *actions,
                         struct instr_encoding *instr)
 {
+    enum ofperr ret;
     const struct ofpact *act;
     struct instr_cursor cursor;
     memset(&cursor, 0, sizeof(struct instr_cursor));
@@ -350,13 +351,13 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
                  nact < ofpact_end(nest->actions, nest_action_len);
                  nact = ofpact_next(nact)) {
 
-                if (!bsw_extract_action(nact, instr, &cursor, true))
-                    return -1;
+                if ((ret = bsw_extract_action(nact, instr, &cursor, true)) != 0)
+                    return ret;
             }
         } else {
             /* Process this as in an Apply-Action instruction. */
-            if (!bsw_extract_action(act, instr, &cursor, false))
-                return -1;
+            if ((ret = bsw_extract_action(act, instr, &cursor, false)) != 0)
+                return ret;
         }
     }
 
