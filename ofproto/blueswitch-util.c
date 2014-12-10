@@ -363,3 +363,97 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
 
    return 0;
 }
+
+struct t_state {
+    uint32_t                n_entries;
+    enum t_entry_state      entries[];
+};
+
+struct t_state *
+bsw_init_table_state(uint32_t n_entries)
+{
+    struct t_state *t;
+    size_t sz = sizeof(*t) + 4*sizeof(n_entries);
+    t = (struct t_state *)xzalloc(sz);
+    if (t) {
+        t->n_entries = n_entries;
+    }
+    return t;
+}
+
+struct t_update {
+    struct t_state *           t_state;
+    uint32_t                   cmd_queue_len;
+    uint32_t                   next_cmd;
+    struct t_entry_update      cmds[];
+};
+
+struct t_update *
+bsw_init_table_update(struct t_state *table, uint32_t cmd_queue_len)
+{
+    struct t_update *u;
+    size_t sz = sizeof(*u) + cmd_queue_len*sizeof(struct t_entry_update);
+    u = (struct t_update *)xzalloc(sz);
+    if (u) {
+        u->t_state = table;
+        u->cmd_queue_len = cmd_queue_len;
+    }
+    return u;
+}
+
+enum ofperr
+bsw_allocate_tcam_ent_update(struct t_update *table, enum t_entry_update_type t,
+                             struct t_entry_update **ent)
+{
+    for (int i = table->next_cmd; i < table->cmd_queue_len; i++) {
+        struct t_entry_update *u = &table->cmds[i];
+
+        switch (u->type) {
+        case TEM_UPDATE:
+            break;
+        case TEM_DELETE:
+            if (t == TEM_UPDATE) {
+                /* Instead of deleting this entry, we can just overwrite it. */
+                u->type = t;
+                *ent = u;
+                table->next_cmd = i+1;
+                return 0;
+            }
+            break;
+        case TEM_NOCHANGE:
+            u->type = t;
+            *ent = u;
+            table->next_cmd = i+1;
+            return 0;
+        }
+    }
+    *ent = NULL;
+    return OFPERR_OFPFMFC_TABLE_FULL;
+}
+
+void
+bsw_initialize_switch_state(const struct bs_info *bsi, struct s_state *s)
+{
+    s->n_tables = bsi->num_tcams;
+    s->table_states  = (struct t_state **)xmalloc(bsi->num_tcams
+                                                  * sizeof(* (s->table_states)));
+    s->table_updates = (struct t_update **)xmalloc(bsi->num_tcams
+                                                   * sizeof(* (s->table_updates)));
+    for (int i = 0; i < bsi->num_tcams; i++) {
+        const struct tcam_info *tci = &bsi->tcams[i];
+        struct t_state *t = bsw_init_table_state(tci->num_entries);
+        s->table_states[i]  = t;
+        s->table_updates[i] = bsw_init_table_update(t, tci->num_entries);
+    }
+}
+
+void
+bsw_destroy_switch_state(struct s_state *s)
+{
+    for (int i = 0; i < s->n_tables; i++) {
+        free(s->table_states[i]);
+        free(s->table_updates[i]);
+    }
+    free(s->table_states);
+    free(s->table_updates);
+}

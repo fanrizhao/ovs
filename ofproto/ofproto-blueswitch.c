@@ -55,15 +55,18 @@ const struct ofproto_class ofproto_blueswitch_class;
 
 struct ofproto_blueswitch {
     struct hmap_node all_ofproto_dpifs_node; /* In 'all_ofproto_dpifs'. */
-    struct ofproto up;
-
-    /* top-level switch configuration */
-    struct bs_info *bs_info;
+    struct ofproto  up;
 
     /* OVS ports indexed by their netdev name.  */
-    struct shash ports_by_name;
+    struct shash    ports_by_name;
     /* TODO: FIXME: differentiate between dma and phys ports! */
-    ofp_port_t next_port;
+    ofp_port_t      next_port;
+
+    /* top-level switch configuration */
+    struct bs_info  *bs_info;
+
+    /* hardware switch state */
+    struct s_state  s_state;
 };
 
 static inline struct ofproto_blueswitch *
@@ -131,11 +134,11 @@ construct(struct ofproto *ofproto)
     int ret;
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
 
-    /* Read in switch configuration. */
-    bswitch->bs_info = &bsi_table;
-
     shash_init(&bswitch->ports_by_name);
     bswitch->next_port = 1;
+
+    /* Read in switch configuration. */
+    bswitch->bs_info = &bsi_table;
 
     /* Initialize handle to switch driver. */
     ret = open_switch(bswitch->bs_info);
@@ -146,6 +149,10 @@ construct(struct ofproto *ofproto)
 
     /* Allocate space for tables. */
     ofproto_init_tables(ofproto, bswitch->bs_info->num_tcams);
+
+    /* Allocate and initialize the table states. */
+
+    bsw_initialize_switch_state(bswitch->bs_info, &bswitch->s_state);
 
     /* TODO:
      *
@@ -167,6 +174,8 @@ destruct(struct ofproto *ofproto)
      * ->destruct() must also destroy all remaining rules in the ofproto's
      * tables, by passing each remaining rule to ofproto_rule_delete().
      */
+
+    bsw_destroy_switch_state(&bswitch->s_state);
 
     close_switch(bswitch->bs_info);
     bswitch->bs_info = NULL;
@@ -440,9 +449,14 @@ rule_insert(struct rule *rule)
     ovs_mutex_lock(&rule->mutex);
 
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
-    struct bs_info *bsi = bswitch->bs_info;
+    struct bs_info *bsi                = bswitch->bs_info;
+    struct s_state *s_state            = &bswitch->s_state;
+
     ovs_assert(rule->table_id < bsi->num_tcams);
+
     const struct tcam_info *tcam = &bsi->tcams[rule->table_id];
+    struct t_state *t_state      = s_state->table_states[rule->table_id];
+    struct t_update *t_update    = s_state->table_updates[rule->table_id];
 
     /* Expand the compressed minimatch.  We can't directly use the compressed
        match, since the Blueswitch tables might use fields in a different order
@@ -452,13 +466,14 @@ rule_insert(struct rule *rule)
     minimatch_expand(&rule->cr.match, &match);
 
     enum ofperr ret;
-    struct bsw_tcam_key key;
-    struct instr_encoding instr;
-
-    ret = bsw_extract_tcam_key(tcam, &match, &key);
+    struct t_entry_update *ent_update;
+    ret = bsw_allocate_tcam_ent_update(t_update, TEM_UPDATE, &ent_update);
     if (ret) goto error;
 
-    ret = bsw_extract_instruction(tcam, rule_get_actions(rule), &instr);
+    ret = bsw_extract_tcam_key(tcam, &match, &ent_update->key);
+    if (ret) goto error;
+
+    ret = bsw_extract_instruction(tcam, rule_get_actions(rule), &ent_update->instr);
     if (ret) goto error;
 
     /* XXX: TODO: Now program the darn switch.  Need to allocate an index for

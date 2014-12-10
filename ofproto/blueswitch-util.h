@@ -45,4 +45,49 @@ enum ofperr bsw_extract_instruction(const struct tcam_info *tcam,
 				    const struct rule_actions *actions,
 				    struct instr_encoding *instr);
 
+/* tcam table state */
+
+enum t_entry_state {
+  TE_EMPTY = 0,
+  TE_OCCUPIED,
+};
+
+struct t_state;
+
+struct t_state *bsw_init_table_state(uint32_t n_entries);
+
+/* tcam table modifications */
+
+enum t_entry_update_type {
+  TEM_NOCHANGE = 0,
+  TEM_DELETE,
+  TEM_UPDATE,
+};
+
+struct t_entry_update {
+    enum t_entry_update_type   type;
+    struct bsw_tcam_key        key;
+    struct instr_encoding      instr;
+};
+
+struct t_update;
+
+struct t_update *bsw_init_table_update(struct t_state *table, uint32_t cmd_queue_len);
+
+enum ofperr bsw_allocate_tcam_ent_update(struct t_update *table, enum t_entry_update_type t,
+					 struct t_entry_update **ent);
+
+struct s_state {
+  uint32_t          n_tables;
+
+  /* array of table tcam state */
+  struct t_state    **table_states;
+
+  /* array of table tcam update state */
+  struct t_update   **table_updates;
+};
+
+void bsw_initialize_switch_state(const struct bs_info *bsi, struct s_state *s);
+void bsw_destroy_switch_state(struct s_state *s);
+
 #endif /* BLUESWITCH_UTIL_H */
