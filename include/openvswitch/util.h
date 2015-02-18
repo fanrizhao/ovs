@@ -19,6 +19,10 @@
 
 #include <openvswitch/version.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void ovs_set_program_name__(const char *name, const char *version,
                             const char *date, const char *time);
 
@@ -27,5 +31,23 @@ void ovs_set_program_name__(const char *name, const char *version,
 
 const char *ovs_get_program_name(void);
 const char *ovs_get_program_version(void);
+
+/* Expands to a string that looks like "<file>:<line>", e.g. "tmp.c:10".
+ *
+ * See http://c-faq.com/ansi/stringize.html for an explanation of OVS_STRINGIZE
+ * and OVS_STRINGIZE2. */
+#define OVS_SOURCE_LOCATOR __FILE__ ":" OVS_STRINGIZE(__LINE__)
+#define OVS_STRINGIZE(ARG) OVS_STRINGIZE2(ARG)
+#define OVS_STRINGIZE2(ARG) #ARG
+
+/* Saturating multiplication of "unsigned int"s: overflow yields UINT_MAX. */
+#define OVS_SAT_MUL(X, Y)                                               \
+    ((Y) == 0 ? 0                                                       \
+     : (X) <= UINT_MAX / (Y) ? (unsigned int) (X) * (unsigned int) (Y)  \
+     : UINT_MAX)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

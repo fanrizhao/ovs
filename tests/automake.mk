@@ -1,12 +1,22 @@
 EXTRA_DIST += \
+	$(COMMON_MACROS_AT) \
 	$(TESTSUITE_AT) \
+	$(KMOD_TESTSUITE_AT) \
 	$(TESTSUITE) \
+	$(KMOD_TESTSUITE) \
 	tests/atlocal.in \
 	$(srcdir)/package.m4 \
-	$(srcdir)/tests/testsuite
+	$(srcdir)/tests/testsuite \
+	$(srcdir)/tests/testsuite.patch
+
+COMMON_MACROS_AT = \
+	tests/ovsdb-macros.at \
+	tests/ovs-macros.at \
+	tests/ofproto-macros.at
+
 TESTSUITE_AT = \
 	tests/testsuite.at \
-	tests/ovsdb-macros.at \
+	tests/completion.at \
 	tests/library.at \
 	tests/heap.at \
 	tests/bundle.at \
@@ -20,10 +30,12 @@ TESTSUITE_AT = \
 	tests/ofp-errors.at \
 	tests/ovs-ofctl.at \
 	tests/odp.at \
+	tests/mpls-xlate.at \
 	tests/multipath.at \
 	tests/bfd.at \
 	tests/cfm.at \
 	tests/lacp.at \
+	tests/lib.at \
 	tests/learn.at \
 	tests/vconn.at \
 	tests/file_name.at \
@@ -42,7 +54,6 @@ TESTSUITE_AT = \
 	tests/ofproto-dpif.at \
 	tests/bridge.at \
 	tests/vlan-splinters.at \
-	tests/ofproto-macros.at \
 	tests/ofproto.at \
 	tests/ovsdb.at \
 	tests/ovsdb-log.at \
@@ -70,7 +81,15 @@ TESTSUITE_AT = \
 	tests/interface-reconfigure.at \
 	tests/vlog.at \
 	tests/vtep-ctl.at
+
+KMOD_TESTSUITE_AT = \
+	tests/kmod-testsuite.at \
+	tests/kmod-macros.at \
+	tests/kmod-traffic.at
+
 TESTSUITE = $(srcdir)/tests/testsuite
+TESTSUITE_PATCH = $(srcdir)/tests/testsuite.patch
+KMOD_TESTSUITE = $(srcdir)/tests/kmod-testsuite
 DISTCLEANFILES += tests/atconfig tests/atlocal
 
 AUTOTEST_PATH = utilities:vswitchd:ovsdb:vtep:tests
@@ -165,11 +184,26 @@ check-ryu: all
 	$(AM_V_at)srcdir='$(srcdir)' $(SHELL) $(srcdir)/tests/run-ryu
 EXTRA_DIST += tests/run-ryu
 
+# Run kmod tests. Assume kernel modules has been installed or linked into the kernel
+check-kernel: all tests/atconfig tests/atlocal $(KMOD_TESTSUITE)
+	$(SHELL) '$(KMOD_TESTSUITE)' -C tests  AUTOTEST_PATH='$(AUTOTEST_PATH)' -d $(TESTSUITEFLAGS)
+
+# Testing the out of tree Kernel module
+check-kmod: all tests/atconfig tests/atlocal $(KMOD_TESTSUITE)
+	$(MAKE) modules_install
+	modprobe -r openvswitch
+	$(MAKE) check-kernel
+
 clean-local:
 	test ! -f '$(TESTSUITE)' || $(SHELL) '$(TESTSUITE)' -C tests --clean
 
 AUTOTEST = $(AUTOM4TE) --language=autotest
-$(TESTSUITE): package.m4 $(TESTSUITE_AT)
+$(TESTSUITE): package.m4 $(TESTSUITE_AT) $(COMMON_MACROS_AT) $(TESTSUITE_PATCH)
+	$(AM_V_GEN)$(AUTOTEST) -I '$(srcdir)' -o $@.tmp $@.at
+	patch -p0 $@.tmp $(TESTSUITE_PATCH)
+	$(AM_V_at)mv $@.tmp $@
+
+$(KMOD_TESTSUITE): package.m4 $(KMOD_TESTSUITE_AT) $(COMMON_MACROS_AT)
 	$(AM_V_GEN)$(AUTOTEST) -I '$(srcdir)' -o $@.tmp $@.at
 	$(AM_V_at)mv $@.tmp $@
 
@@ -191,6 +225,11 @@ tests_test_ovsdb_SOURCES = \
 	tests/idltest.h
 EXTRA_DIST += tests/uuidfilt.pl tests/ovsdb-monitor-sort.pl
 tests_test_ovsdb_LDADD = ovsdb/libovsdb.la lib/libopenvswitch.la
+
+noinst_PROGRAMS += tests/test-lib
+tests_test_lib_SOURCES = \
+	tests/test-lib.c
+tests_test_lib_LDADD = lib/libopenvswitch.la
 
 # idltest schema and IDL
 OVSIDL_BUILT += tests/idltest.c tests/idltest.h tests/idltest.ovsidl

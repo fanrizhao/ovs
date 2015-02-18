@@ -35,7 +35,7 @@
 #include "socket-util.h"
 #include "unaligned.h"
 #include "util.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(meta_flow);
 
@@ -108,6 +108,8 @@ mf_is_all_wild(const struct mf_field *mf, const struct flow_wildcards *wc)
         return !wc->masks.dp_hash;
     case MFF_RECIRC_ID:
         return !wc->masks.recirc_id;
+    case MFF_CONJ_ID:
+        return !wc->masks.conj_id;
     case MFF_TUN_SRC:
         return !wc->masks.tunnel.ip_src;
     case MFF_TUN_DST:
@@ -117,6 +119,10 @@ mf_is_all_wild(const struct mf_field *mf, const struct flow_wildcards *wc)
     case MFF_TUN_TTL:
     case MFF_TUN_FLAGS:
         return !wc->masks.tunnel.tun_id;
+    case MFF_TUN_GBP_ID:
+        return !wc->masks.tunnel.gbp_id;
+    case MFF_TUN_GBP_FLAGS:
+        return !wc->masks.tunnel.gbp_flags;
     case MFF_METADATA:
         return !wc->masks.metadata;
     case MFF_IN_PORT:
@@ -363,12 +369,15 @@ mf_is_value_valid(const struct mf_field *mf, const union mf_value *value)
     switch (mf->id) {
     case MFF_DP_HASH:
     case MFF_RECIRC_ID:
+    case MFF_CONJ_ID:
     case MFF_TUN_ID:
     case MFF_TUN_SRC:
     case MFF_TUN_DST:
     case MFF_TUN_TOS:
     case MFF_TUN_TTL:
     case MFF_TUN_FLAGS:
+    case MFF_TUN_GBP_ID:
+    case MFF_TUN_GBP_FLAGS:
     case MFF_METADATA:
     case MFF_IN_PORT:
     case MFF_SKB_PRIORITY:
@@ -464,6 +473,9 @@ mf_get_value(const struct mf_field *mf, const struct flow *flow,
     case MFF_RECIRC_ID:
         value->be32 = htonl(flow->recirc_id);
         break;
+    case MFF_CONJ_ID:
+        value->be32 = htonl(flow->conj_id);
+        break;
     case MFF_TUN_ID:
         value->be64 = flow->tunnel.tun_id;
         break;
@@ -475,6 +487,12 @@ mf_get_value(const struct mf_field *mf, const struct flow *flow,
         break;
     case MFF_TUN_FLAGS:
         value->be16 = htons(flow->tunnel.flags);
+        break;
+    case MFF_TUN_GBP_ID:
+        value->be16 = flow->tunnel.gbp_id;
+        break;
+    case MFF_TUN_GBP_FLAGS:
+        value->u8 = flow->tunnel.gbp_flags;
         break;
     case MFF_TUN_TTL:
         value->u8 = flow->tunnel.ip_ttl;
@@ -669,6 +687,9 @@ mf_set_value(const struct mf_field *mf,
     case MFF_RECIRC_ID:
         match_set_recirc_id(match, ntohl(value->be32));
         break;
+    case MFF_CONJ_ID:
+        match_set_conj_id(match, ntohl(value->be32));
+        break;
     case MFF_TUN_ID:
         match_set_tun_id(match, value->be64);
         break;
@@ -681,6 +702,12 @@ mf_set_value(const struct mf_field *mf,
     case MFF_TUN_FLAGS:
         match_set_tun_flags(match, ntohs(value->be16));
         break;
+    case MFF_TUN_GBP_ID:
+         match_set_tun_gbp_id(match, value->be16);
+         break;
+    case MFF_TUN_GBP_FLAGS:
+         match_set_tun_gbp_flags(match, value->u8);
+         break;
     case MFF_TUN_TOS:
         match_set_tun_tos(match, value->u8);
         break;
@@ -898,6 +925,9 @@ mf_set_flow_value(const struct mf_field *mf,
     case MFF_RECIRC_ID:
         flow->recirc_id = ntohl(value->be32);
         break;
+    case MFF_CONJ_ID:
+        flow->conj_id = ntohl(value->be32);
+        break;
     case MFF_TUN_ID:
         flow->tunnel.tun_id = value->be64;
         break;
@@ -909,6 +939,12 @@ mf_set_flow_value(const struct mf_field *mf,
         break;
     case MFF_TUN_FLAGS:
         flow->tunnel.flags = ntohs(value->be16);
+        break;
+    case MFF_TUN_GBP_ID:
+        flow->tunnel.gbp_id = value->be16;
+        break;
+    case MFF_TUN_GBP_FLAGS:
+        flow->tunnel.gbp_flags = value->u8;
         break;
     case MFF_TUN_TOS:
         flow->tunnel.ip_tos = value->u8;
@@ -1005,7 +1041,7 @@ mf_set_flow_value(const struct mf_field *mf,
         break;
 
     case MFF_IPV6_LABEL:
-        flow->ipv6_label = value->be32 & ~htonl(IPV6_LABEL_MASK);
+        flow->ipv6_label = value->be32 & htonl(IPV6_LABEL_MASK);
         break;
 
     case MFF_IP_PROTO:
@@ -1152,6 +1188,10 @@ mf_set_wild(const struct mf_field *mf, struct match *match)
         match->flow.recirc_id = 0;
         match->wc.masks.recirc_id = 0;
         break;
+    case MFF_CONJ_ID:
+        match->flow.conj_id = 0;
+        match->wc.masks.conj_id = 0;
+        break;
     case MFF_TUN_ID:
         match_set_tun_id_masked(match, htonll(0), htonll(0));
         break;
@@ -1163,6 +1203,12 @@ mf_set_wild(const struct mf_field *mf, struct match *match)
         break;
     case MFF_TUN_FLAGS:
         match_set_tun_flags_masked(match, 0, 0);
+        break;
+    case MFF_TUN_GBP_ID:
+        match_set_tun_gbp_id_masked(match, 0, 0);
+        break;
+    case MFF_TUN_GBP_FLAGS:
+        match_set_tun_gbp_flags_masked(match, 0, 0);
         break;
     case MFF_TUN_TOS:
         match_set_tun_tos_masked(match, 0, 0);
@@ -1373,6 +1419,7 @@ mf_set(const struct mf_field *mf,
 
     switch (mf->id) {
     case MFF_RECIRC_ID:
+    case MFF_CONJ_ID:
     case MFF_IN_PORT:
     case MFF_IN_PORT_OXM:
     case MFF_ACTSET_OUTPUT:
@@ -1410,6 +1457,12 @@ mf_set(const struct mf_field *mf,
         break;
     case MFF_TUN_FLAGS:
         match_set_tun_flags_masked(match, ntohs(value->be16), ntohs(mask->be16));
+        break;
+    case MFF_TUN_GBP_ID:
+        match_set_tun_gbp_id_masked(match, value->be16, mask->be16);
+        break;
+    case MFF_TUN_GBP_FLAGS:
+        match_set_tun_gbp_flags_masked(match, value->u8, mask->u8);
         break;
     case MFF_TUN_TTL:
         match_set_tun_ttl_masked(match, value->u8, mask->u8);

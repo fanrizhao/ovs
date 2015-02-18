@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+/* Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,12 +56,11 @@
 #include "ovs-router.h"
 #include "tnl-ports.h"
 #include "tunnel.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 COVERAGE_DEFINE(xlate_actions);
 COVERAGE_DEFINE(xlate_actions_oversize);
 COVERAGE_DEFINE(xlate_actions_too_many_output);
-COVERAGE_DEFINE(xlate_actions_mpls_overflow);
 
 VLOG_DEFINE_THIS_MODULE(ofproto_dpif_xlate);
 
@@ -82,7 +81,7 @@ struct xbridge {
     struct hmap_node hmap_node;   /* Node in global 'xbridges' map. */
     struct ofproto_dpif *ofproto; /* Key in global 'xbridges' map. */
 
-    struct list xbundles;         /* Owned xbundles. */
+    struct ovs_list xbundles;     /* Owned xbundles. */
     struct hmap xports;           /* Indexed by ofp_port. */
 
     char *name;                   /* Name used in log messages. */
@@ -120,10 +119,10 @@ struct xbundle {
     struct hmap_node hmap_node;    /* In global 'xbundles' map. */
     struct ofbundle *ofbundle;     /* Key in global 'xbundles' map. */
 
-    struct list list_node;         /* In parent 'xbridges' list. */
+    struct ovs_list list_node;     /* In parent 'xbridges' list. */
     struct xbridge *xbridge;       /* Parent xbridge. */
 
-    struct list xports;            /* Contains "struct xport"s. */
+    struct ovs_list xports;        /* Contains "struct xport"s. */
 
     char *name;                    /* Name used in log messages. */
     struct bond *bond;             /* Nonnull iff more than one port. */
@@ -146,7 +145,7 @@ struct xport {
 
     odp_port_t odp_port;             /* Datapath port number or ODPP_NONE. */
 
-    struct list bundle_node;         /* In parent xbundle (if it exists). */
+    struct ovs_list bundle_node;     /* In parent xbundle (if it exists). */
     struct xbundle *xbundle;         /* Parent xbundle or null. */
 
     struct netdev *netdev;           /* 'ofport''s netdev. */
@@ -197,6 +196,7 @@ struct xlate_ctx {
     int recurse;                /* Current resubmit nesting depth. */
     int resubmits;              /* Total number of resubmits. */
     bool in_group;              /* Currently translating ofgroup, if true. */
+    bool in_action_set;         /* Currently translating action_set, if true. */
 
     uint32_t orig_skb_priority; /* Priority when packet arrived. */
     uint8_t table_id;           /* OpenFlow table ID where flow was found. */
@@ -981,18 +981,48 @@ static struct ofproto_dpif *
 xlate_lookup_ofproto_(const struct dpif_backer *backer, const struct flow *flow,
                       ofp_port_t *ofp_in_port, const struct xport **xportp)
 {
+    struct ofproto_dpif *recv_ofproto = NULL;
+    struct ofproto_dpif *recirc_ofproto = NULL;
     const struct xport *xport;
+    ofp_port_t in_port = OFPP_NONE;
 
     *xportp = xport = xlate_lookup_xport(backer, flow);
 
     if (xport) {
-        if (ofp_in_port) {
-            *ofp_in_port = xport->ofp_port;
-        }
-        return xport->xbridge->ofproto;
+        recv_ofproto = xport->xbridge->ofproto;
+        in_port = xport->ofp_port;
     }
 
-    return NULL;
+    /* When recirc_id is set in 'flow', checks whether the ofproto_dpif that
+     * corresponds to the recirc_id is same as the receiving bridge.  If they
+     * are the same, uses the 'recv_ofproto' and keeps the 'ofp_in_port' as
+     * assigned.  Otherwise, uses the 'recirc_ofproto' that owns recirc_id and
+     * assigns OFPP_NONE to 'ofp_in_port'.  Doing this is in that, the
+     * recirculated flow must be processced by the ofproto which originates
+     * the recirculation, and as bridges can only see their own ports, the
+     * in_port of the 'recv_ofproto' should not be passed to the
+     * 'recirc_ofproto'.
+     *
+     * Admittedly, setting the 'ofp_in_port' to OFPP_NONE limits the
+     * 'recirc_ofproto' from meaningfully matching on in_port of recirculated
+     * flow, and should be fixed in the near future.
+     *
+     * TODO: Restore the original patch port.
+     */
+    if (recv_ofproto && flow->recirc_id) {
+        recirc_ofproto = ofproto_dpif_recirc_get_ofproto(backer,
+                                                         flow->recirc_id);
+        if (recv_ofproto != recirc_ofproto) {
+            *xportp = xport = NULL;
+            in_port = OFPP_NONE;
+        }
+    }
+
+    if (ofp_in_port) {
+        *ofp_in_port = in_port;
+    }
+
+    return xport ? recv_ofproto : recirc_ofproto;
 }
 
 /* Given a datapath and flow metadata ('backer', and 'flow' respectively)
@@ -1013,9 +1043,7 @@ xlate_lookup_ofproto(const struct dpif_backer *backer, const struct flow *flow,
  * pointers until quiescing, for longer term use additional references must
  * be taken.
  *
- * '*ofp_in_port' is set to OFPP_NONE if 'flow''s in_port does not exist.
- *
- * Returns 0 if successful, ENODEV if the parsed flow has no associated ofport.
+ * Returns 0 if successful, ENODEV if the parsed flow has no associated ofproto.
  */
 int
 xlate_lookup(const struct dpif_backer *backer, const struct flow *flow,
@@ -1028,11 +1056,7 @@ xlate_lookup(const struct dpif_backer *backer, const struct flow *flow,
 
     ofproto = xlate_lookup_ofproto_(backer, flow, ofp_in_port, &xport);
 
-    if (ofp_in_port && !xport) {
-        *ofp_in_port = OFPP_NONE;
-    }
-
-    if (!xport) {
+    if (!ofproto) {
         return ENODEV;
     }
 
@@ -1041,16 +1065,17 @@ xlate_lookup(const struct dpif_backer *backer, const struct flow *flow,
     }
 
     if (ipfix) {
-        *ipfix = xport->xbridge->ipfix;
+        *ipfix = xport ? xport->xbridge->ipfix : NULL;
     }
 
     if (sflow) {
-        *sflow = xport->xbridge->sflow;
+        *sflow = xport ? xport->xbridge->sflow : NULL;
     }
 
     if (netflow) {
-        *netflow = xport->xbridge->netflow;
+        *netflow = xport ? xport->xbridge->netflow : NULL;
     }
+
     return 0;
 }
 
@@ -1309,7 +1334,7 @@ group_first_live_bucket(const struct xlate_ctx *ctx,
                         const struct group_dpif *group, int depth)
 {
     struct ofputil_bucket *bucket;
-    const struct list *buckets;
+    const struct ovs_list *buckets;
 
     group_dpif_get_buckets(group, &buckets);
     LIST_FOR_EACH (bucket, list_node, buckets) {
@@ -1331,7 +1356,7 @@ group_best_live_bucket(const struct xlate_ctx *ctx,
     int i = 0;
 
     struct ofputil_bucket *bucket;
-    const struct list *buckets;
+    const struct ovs_list *buckets;
 
     group_dpif_get_buckets(group, &buckets);
     LIST_FOR_EACH (bucket, list_node, buckets) {
@@ -1777,9 +1802,10 @@ is_admissible(struct xlate_ctx *ctx, struct xport *in_port,
         case BV_DROP_IF_MOVED:
             ovs_rwlock_rdlock(&xbridge->ml->rwlock);
             mac = mac_learning_lookup(xbridge->ml, flow->dl_src, vlan);
-            if (mac && mac->port.p != in_xbundle->ofbundle &&
-                (!is_gratuitous_arp(flow, &ctx->xout->wc)
-                 || mac_entry_is_grat_arp_locked(mac))) {
+            if (mac
+                && mac_entry_get_port(xbridge->ml, mac) != in_xbundle->ofbundle
+                && (!is_gratuitous_arp(flow, &ctx->xout->wc)
+                    || mac_entry_is_grat_arp_locked(mac))) {
                 ovs_rwlock_unlock(&xbridge->ml->rwlock);
                 xlate_report(ctx, "SLB bond thinks this packet looped back, "
                              "dropping");
@@ -1831,7 +1857,7 @@ OVS_REQ_RDLOCK(ml->rwlock)
         }
     }
 
-    return mac->port.p != in_xbundle->ofbundle;
+    return mac_entry_get_port(ml, mac) != in_xbundle->ofbundle;
 }
 
 
@@ -1867,7 +1893,7 @@ OVS_REQ_WRLOCK(xbridge->ml->rwlock)
         }
     }
 
-    if (mac->port.p != in_xbundle->ofbundle) {
+    if (mac_entry_get_port(xbridge->ml, mac) != in_xbundle->ofbundle) {
         /* The log messages here could actually be useful in debugging,
          * so keep the rate limit relatively high. */
         static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(30, 300);
@@ -1877,8 +1903,7 @@ OVS_REQ_WRLOCK(xbridge->ml->rwlock)
                     xbridge->name, ETH_ADDR_ARGS(flow->dl_src),
                     in_xbundle->name, vlan);
 
-        mac->port.p = in_xbundle->ofbundle;
-        mac_learning_changed(xbridge->ml);
+        mac_entry_set_port(xbridge->ml, mac, in_xbundle->ofbundle);
     }
 }
 
@@ -1958,7 +1983,7 @@ update_mcast_snooping_table(const struct xbridge *xbridge,
     struct mcast_snooping *ms = xbridge->ms;
     struct xlate_cfg *xcfg;
     struct xbundle *mcast_xbundle;
-    struct mcast_fport_bundle *fport;
+    struct mcast_port_bundle *fport;
 
     /* Don't learn the OFPP_NONE port. */
     if (in_xbundle == &ofpp_none_bundle) {
@@ -1969,7 +1994,7 @@ update_mcast_snooping_table(const struct xbridge *xbridge,
     mcast_xbundle = NULL;
     ovs_rwlock_wrlock(&ms->rwlock);
     xcfg = ovsrcu_get(struct xlate_cfg *, &xcfgp);
-    LIST_FOR_EACH(fport, fport_node, &ms->fport_list) {
+    LIST_FOR_EACH(fport, node, &ms->fport_list) {
         mcast_xbundle = xbundle_lookup(xcfg, fport->port);
         if (mcast_xbundle == in_xbundle) {
             break;
@@ -2042,11 +2067,11 @@ xlate_normal_mcast_send_fports(struct xlate_ctx *ctx,
     OVS_REQ_RDLOCK(ms->rwlock)
 {
     struct xlate_cfg *xcfg;
-    struct mcast_fport_bundle *fport;
+    struct mcast_port_bundle *fport;
     struct xbundle *mcast_xbundle;
 
     xcfg = ovsrcu_get(struct xlate_cfg *, &xcfgp);
-    LIST_FOR_EACH(fport, fport_node, &ms->fport_list) {
+    LIST_FOR_EACH(fport, node, &ms->fport_list) {
         mcast_xbundle = xbundle_lookup(xcfg, fport->port);
         if (mcast_xbundle && mcast_xbundle != in_xbundle) {
             xlate_report(ctx, "forwarding to mcast flood port");
@@ -2055,6 +2080,31 @@ xlate_normal_mcast_send_fports(struct xlate_ctx *ctx,
             xlate_report(ctx, "mcast flood port is unknown, dropping");
         } else {
             xlate_report(ctx, "mcast flood port is input port, dropping");
+        }
+    }
+}
+
+/* forward the Reports to configured ports */
+static void
+xlate_normal_mcast_send_rports(struct xlate_ctx *ctx,
+                               struct mcast_snooping *ms,
+                               struct xbundle *in_xbundle, uint16_t vlan)
+    OVS_REQ_RDLOCK(ms->rwlock)
+{
+    struct xlate_cfg *xcfg;
+    struct mcast_port_bundle *rport;
+    struct xbundle *mcast_xbundle;
+
+    xcfg = ovsrcu_get(struct xlate_cfg *, &xcfgp);
+    LIST_FOR_EACH(rport, node, &ms->rport_list) {
+        mcast_xbundle = xbundle_lookup(xcfg, rport->port);
+        if (mcast_xbundle && mcast_xbundle != in_xbundle) {
+            xlate_report(ctx, "forwarding Report to mcast flagged port");
+            output_normal(ctx, mcast_xbundle, vlan);
+        } else if (!mcast_xbundle) {
+            xlate_report(ctx, "mcast port is unknown, dropping the Report");
+        } else {
+            xlate_report(ctx, "mcast port is input port, dropping the Report");
         }
     }
 }
@@ -2173,6 +2223,15 @@ xlate_normal(struct xlate_ctx *ctx)
             if (mcast_snooping_is_membership(flow->tp_src)) {
                 ovs_rwlock_rdlock(&ms->rwlock);
                 xlate_normal_mcast_send_mrouters(ctx, ms, in_xbundle, vlan);
+                /* RFC4541: section 2.1.1, item 1: A snooping switch should
+                 * forward IGMP Membership Reports only to those ports where
+                 * multicast routers are attached.  Alternatively stated: a
+                 * snooping switch should not forward IGMP Membership Reports
+                 * to ports on which only hosts are attached.
+                 * An administrative control may be provided to override this
+                 * restriction, allowing the report messages to be flooded to
+                 * other ports. */
+                xlate_normal_mcast_send_rports(ctx, ms, in_xbundle, vlan);
                 ovs_rwlock_unlock(&ms->rwlock);
             } else {
                 xlate_report(ctx, "multicast traffic, flooding");
@@ -2210,7 +2269,7 @@ xlate_normal(struct xlate_ctx *ctx)
     } else {
         ovs_rwlock_rdlock(&ctx->xbridge->ml->rwlock);
         mac = mac_learning_lookup(ctx->xbridge->ml, flow->dl_dst, vlan);
-        mac_port = mac ? mac->port.p : NULL;
+        mac_port = mac ? mac_entry_get_port(ctx->xbridge->ml, mac) : NULL;
         ovs_rwlock_unlock(&ctx->xbridge->ml->rwlock);
 
         if (mac_port) {
@@ -2611,7 +2670,7 @@ compose_output_action__(struct xlate_ctx *ctx, ofp_port_t ofp_port,
 
     /* If 'struct flow' gets additional metadata, we'll need to zero it out
      * before traversing a patch port. */
-    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 28);
+    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 31);
     memset(&flow_tnl, 0, sizeof flow_tnl);
 
     if (!xport) {
@@ -2655,6 +2714,7 @@ compose_output_action__(struct xlate_ctx *ctx, ofp_port_t ofp_port,
         const struct xport *peer = xport->peer;
         struct flow old_flow = ctx->xin->flow;
         enum slow_path_reason special;
+        uint8_t table_id = rule_dpif_lookup_get_init_table_id(&ctx->xin->flow);
 
         ctx->xbridge = peer->xbridge;
         flow->in_port.ofp_port = peer->ofp_port;
@@ -2669,14 +2729,16 @@ compose_output_action__(struct xlate_ctx *ctx, ofp_port_t ofp_port,
             ctx->xout->slow |= special;
         } else if (may_receive(peer, ctx)) {
             if (xport_stp_forward_state(peer) && xport_rstp_forward_state(peer)) {
-                xlate_table_action(ctx, flow->in_port.ofp_port, 0, true, true);
+                xlate_table_action(ctx, flow->in_port.ofp_port, table_id,
+                                   true, true);
             } else {
                 /* Forwarding is disabled by STP and RSTP.  Let OFPP_NORMAL and
                  * the learning action look at the packet, then drop it. */
                 struct flow old_base_flow = ctx->base_flow;
                 size_t old_size = ofpbuf_size(ctx->xout->odp_actions);
                 mirror_mask_t old_mirrors = ctx->xout->mirrors;
-                xlate_table_action(ctx, flow->in_port.ofp_port, 0, true, true);
+                xlate_table_action(ctx, flow->in_port.ofp_port, table_id,
+                                   true, true);
                 ctx->xout->mirrors = old_mirrors;
                 ctx->base_flow = old_base_flow;
                 ofpbuf_set_size(ctx->xout->odp_actions, old_size);
@@ -2956,7 +3018,7 @@ static void
 xlate_all_group(struct xlate_ctx *ctx, struct group_dpif *group)
 {
     struct ofputil_bucket *bucket;
-    const struct list *buckets;
+    const struct ovs_list *buckets;
     struct flow old_flow = ctx->xin->flow;
 
     group_dpif_get_buckets(group, &buckets);
@@ -3271,9 +3333,6 @@ compose_mpls_push_action(struct xlate_ctx *ctx, struct ofpact_push_mpls *mpls)
         }
         ctx->exit = true;
         return;
-    } else if (n >= ctx->xbridge->max_mpls_depth) {
-        COVERAGE_INC(xlate_actions_mpls_overflow);
-        ctx->xout->slow |= SLOW_ACTION;
     }
 
     flow_push_mpls(flow, n, mpls->ethertype, wc);
@@ -3287,7 +3346,7 @@ compose_mpls_pop_action(struct xlate_ctx *ctx, ovs_be16 eth_type)
     int n = flow_count_mpls_labels(flow, wc);
 
     if (flow_pop_mpls(flow, n, eth_type, wc)) {
-        if (ctx->xbridge->enable_recirc && !eth_type_mpls(eth_type)) {
+        if (ctx->xbridge->enable_recirc) {
             ctx->was_mpls = true;
         }
     } else if (n >= FLOW_MAX_MPLS_LABELS) {
@@ -3405,7 +3464,11 @@ xlate_output_action(struct xlate_ctx *ctx,
         flood_packets(ctx, true);
         break;
     case OFPP_CONTROLLER:
-        execute_controller_action(ctx, max_len, OFPR_ACTION, 0);
+        execute_controller_action(ctx, max_len,
+                                  (ctx->in_group ? OFPR_GROUP
+                                   : ctx->in_action_set ? OFPR_ACTION_SET
+                                   : OFPR_ACTION),
+                                  0);
         break;
     case OFPP_NONE:
         break;
@@ -3687,18 +3750,23 @@ xlate_action_set(struct xlate_ctx *ctx)
     uint64_t action_list_stub[1024 / 64];
     struct ofpbuf action_list;
 
+    ctx->in_action_set = true;
     ofpbuf_use_stub(&action_list, action_list_stub, sizeof action_list_stub);
     ofpacts_execute_action_set(&action_list, &ctx->action_set);
     do_xlate_actions(ofpbuf_data(&action_list), ofpbuf_size(&action_list), ctx);
+    ctx->in_action_set = false;
     ofpbuf_uninit(&action_list);
 }
 
 static bool
-ofpact_needs_recirculation_after_mpls(const struct xlate_ctx *ctx,
-                                      const struct ofpact *a)
+ofpact_needs_recirculation_after_mpls(const struct ofpact *a, struct xlate_ctx *ctx)
 {
     struct flow_wildcards *wc = &ctx->xout->wc;
     struct flow *flow = &ctx->xin->flow;
+
+    if (!ctx->was_mpls) {
+        return false;
+    }
 
     switch (a->type) {
     case OFPACT_OUTPUT:
@@ -3714,11 +3782,7 @@ ofpact_needs_recirculation_after_mpls(const struct xlate_ctx *ctx,
     case OFPACT_SET_TUNNEL:
     case OFPACT_SET_QUEUE:
     case OFPACT_POP_QUEUE:
-    case OFPACT_POP_MPLS:
-    case OFPACT_DEC_MPLS_TTL:
-    case OFPACT_SET_MPLS_TTL:
-    case OFPACT_SET_MPLS_TC:
-    case OFPACT_SET_MPLS_LABEL:
+    case OFPACT_CONJUNCTION:
     case OFPACT_NOTE:
     case OFPACT_OUTPUT_REG:
     case OFPACT_EXIT:
@@ -3729,6 +3793,11 @@ ofpact_needs_recirculation_after_mpls(const struct xlate_ctx *ctx,
     case OFPACT_SAMPLE:
         return false;
 
+    case OFPACT_POP_MPLS:
+    case OFPACT_DEC_MPLS_TTL:
+    case OFPACT_SET_MPLS_TTL:
+    case OFPACT_SET_MPLS_TC:
+    case OFPACT_SET_MPLS_LABEL:
     case OFPACT_SET_IPV4_SRC:
     case OFPACT_SET_IPV4_DST:
     case OFPACT_SET_IP_DSCP:
@@ -3790,7 +3859,7 @@ do_xlate_actions(const struct ofpact *ofpacts, size_t ofpacts_len,
             break;
         }
 
-        if (ctx->was_mpls && ofpact_needs_recirculation_after_mpls(ctx, a)) {
+        if (ofpact_needs_recirculation_after_mpls(a, ctx)) {
             compose_recirculate_action(ctx, ofpacts, a, ofpacts_len);
             return;
         }
@@ -4026,6 +4095,16 @@ do_xlate_actions(const struct ofpact *ofpacts, size_t ofpacts_len,
         case OFPACT_LEARN:
             xlate_learn_action(ctx, ofpact_get_LEARN(a));
             break;
+
+        case OFPACT_CONJUNCTION: {
+            /* A flow with a "conjunction" action represents part of a special
+             * kind of "set membership match".  Such a flow should not actually
+             * get executed, but it could via, say, a "packet-out", even though
+             * that wouldn't be useful.  Log it to help debugging. */
+            static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
+            VLOG_INFO_RL(&rl, "executing no-op conjunction action");
+            break;
+        }
 
         case OFPACT_EXIT:
             ctx->exit = true;
@@ -4359,6 +4438,7 @@ xlate_actions(struct xlate_in *xin, struct xlate_out *xout)
     ctx.recurse = 0;
     ctx.resubmits = 0;
     ctx.in_group = false;
+    ctx.in_action_set = false;
     ctx.orig_skb_priority = flow->skb_priority;
     ctx.table_id = 0;
     ctx.exit = false;

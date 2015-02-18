@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Nicira, Inc.
+ * Copyright (c) 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,8 +35,8 @@
 #include "packets.h"
 #include "seq.h"
 #include "ovs-router.h"
-#include "ovs-router-linux.h"
 #include "ovs-thread.h"
+#include "route-table.h"
 #include "unixctl.h"
 #include "util.h"
 
@@ -76,7 +76,7 @@ ovs_router_lookup(ovs_be32 ip_dst, char output_bridge[], ovs_be32 *gw)
         *gw = p->gw;
         return true;
     }
-    return false;
+    return route_table_fallback_lookup(ip_dst, output_bridge, gw);
 }
 
 static void
@@ -118,7 +118,7 @@ ovs_router_insert__(uint8_t priority, ovs_be32 ip_dst, uint8_t plen,
     cls_rule_init(&p->cr, &match, priority); /* Longest prefix matches first. */
 
     ovs_mutex_lock(&mutex);
-    cr = classifier_replace(&cls, &p->cr);
+    cr = classifier_replace(&cls, &p->cr, NULL, 0);
     ovs_mutex_unlock(&mutex);
 
     if (cr) {
@@ -260,6 +260,31 @@ ovs_router_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
     ds_destroy(&ds);
 }
 
+static void
+ovs_router_lookup_cmd(struct unixctl_conn *conn, int argc OVS_UNUSED,
+                      const char *argv[], void *aux OVS_UNUSED)
+{
+    ovs_be32 ip;
+    unsigned int plen;
+
+    if (scan_ipv4_route(argv[1], &ip, &plen) && plen == 32) {
+        char iface[IFNAMSIZ];
+        ovs_be32 gw;
+
+        if (ovs_router_lookup(ip, iface, &gw)) {
+            struct ds ds = DS_EMPTY_INITIALIZER;
+
+            ds_put_format(&ds, "gateway " IP_FMT "\n", IP_ARGS(gw));
+            ds_put_format(&ds, "dev %s\n", iface);
+            unixctl_command_reply(conn, ds_cstr(&ds));
+        } else {
+            unixctl_command_reply(conn, "Not found");
+        }
+    } else {
+        unixctl_command_reply(conn, "Invalid parameters");
+    }
+}
+
 void
 ovs_router_flush(void)
 {
@@ -289,4 +314,6 @@ ovs_router_init(void)
     unixctl_command_register("ovs/route/show", "", 0, 0, ovs_router_show, NULL);
     unixctl_command_register("ovs/route/del", "ipv4_addr/prefix_len", 1, 1, ovs_router_del,
                              NULL);
+    unixctl_command_register("ovs/route/lookup", "ipv4_addr", 1, 1,
+                             ovs_router_lookup_cmd, NULL);
 }

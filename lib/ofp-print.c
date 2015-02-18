@@ -82,6 +82,14 @@ ofp_packet_to_string(const void *data, size_t len)
         struct sctp_header *sh = ofpbuf_l4(&buf);
         ds_put_format(&ds, " sctp_csum:%"PRIx32,
                       ntohl(get_16aligned_be32(&sh->sctp_csum)));
+    } else if (flow.nw_proto == IPPROTO_ICMP && l4_size >= ICMP_HEADER_LEN) {
+        struct icmp_header *icmph = ofpbuf_l4(&buf);
+        ds_put_format(&ds, " icmp_csum:%"PRIx16,
+                      ntohs(icmph->icmp_csum));
+    } else if (flow.nw_proto == IPPROTO_ICMPV6 && l4_size >= ICMP6_HEADER_LEN) {
+        struct icmp6_header *icmp6h = ofpbuf_l4(&buf);
+        ds_put_format(&ds, " icmp6_csum:%"PRIx16,
+                      ntohs(icmp6h->icmp6_cksum));
     }
 
     ds_put_char(&ds, '\n');
@@ -125,6 +133,15 @@ ofp_print_packet_in(struct ds *string, const struct ofp_header *oh,
 
     if (pin.fmd.tun_dst != htonl(0)) {
         ds_put_format(string, " tun_dst="IP_FMT, IP_ARGS(pin.fmd.tun_dst));
+    }
+
+    if (pin.fmd.gbp_id != htons(0)) {
+        ds_put_format(string, " gbp_id=%"PRIu16,
+                      ntohs(pin.fmd.gbp_id));
+    }
+
+    if (pin.fmd.gbp_flags) {
+        ds_put_format(string, " gbp_flags=0x%02"PRIx8, pin.fmd.gbp_flags);
     }
 
     if (pin.fmd.metadata != htonll(0)) {
@@ -540,7 +557,7 @@ ofp_print_switch_config(struct ds *string, const struct ofp_switch_config *osc)
 
 static void print_wild(struct ds *string, const char *leader, int is_wild,
             int verbosity, const char *format, ...)
-            PRINTF_FORMAT(5, 6);
+            OVS_PRINTF_FORMAT(5, 6);
 
 static void print_wild(struct ds *string, const char *leader, int is_wild,
                        int verbosity, const char *format, ...)
@@ -2139,7 +2156,7 @@ ofp_print_bucket_id(struct ds *s, const char *label, uint32_t bucket_id,
 
 static void
 ofp_print_group(struct ds *s, uint32_t group_id, uint8_t type,
-                struct list *p_buckets, enum ofp_version ofp_version,
+                struct ovs_list *p_buckets, enum ofp_version ofp_version,
                 bool suppress_type)
 {
     struct ofputil_bucket *bucket;

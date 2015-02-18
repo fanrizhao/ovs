@@ -26,7 +26,7 @@
 #include "ovstest.h"
 #include "svec.h"
 #include "util.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 static struct reconnect *reconnect;
 static int now;
@@ -45,7 +45,7 @@ test_reconnect_main(int argc OVS_UNUSED, char *argv[] OVS_UNUSED)
     int old_time;
     char line[128];
 
-    vlog_set_levels(&VLM_reconnect, VLF_ANY_FACILITY, VLL_OFF);
+    vlog_set_levels(&VLM_reconnect, VLF_ANY_DESTINATION, VLL_OFF);
 
     now = 1000;
     reconnect = reconnect_create(now);

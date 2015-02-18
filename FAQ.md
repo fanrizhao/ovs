@@ -147,6 +147,7 @@ A: The following table lists the Linux kernel versions against which the
 |    2.0.x     | 2.6.32 to 3.10
 |    2.1.x     | 2.6.32 to 3.11
 |    2.3.x     | 2.6.32 to 3.14
+|    2.4.x     | 2.6.32 to 3.19
 
    Open vSwitch userspace should also work with the Linux kernel module
    built into Linux 3.3 and later.
@@ -750,6 +751,26 @@ A: It's an expected behaviour.
        ovs-vsctl add-port br0 p1 -- \
            set interface p1 type=internal
 
+### Q: I want to add thousands of ports to an Open vSwitch bridge, but
+   it takes too long (minutes or hours) to do it with ovs-vsctl.  How
+   can I do it faster?
+
+A: If you add them one at a time with ovs-vsctl, it can take a long
+   time to add thousands of ports to an Open vSwitch bridge.  This is
+   because every invocation of ovs-vsctl first reads the current
+   configuration from OVSDB.  As the number of ports grows, this
+   starts to take an appreciable amount of time, and when it is
+   repeated thousands of times the total time becomes significant.
+
+   The solution is to add the ports in one invocation of ovs-vsctl (or
+   a small number of them).  For example, using bash:
+
+       ovs-vsctl add-br br0
+       cmds=; for i in {1..5000}; do cmds+=" -- add-port br0 p$i"; done
+       ovs-vsctl $cmds
+
+   takes seconds, not minutes or hours, in the OVS sandbox environment.
+
 Quality of Service (QoS)
 ------------------------
 
@@ -1182,8 +1203,8 @@ A: By default, Open vSwitch will use the assigned IANA port for VXLAN, which
    manually on a per-VXLAN tunnel basis. An example of this configuration is
    provided below.
 
-   ovs-vsctl add-br br0
-   ovs-vsctl add-port br0 vxlan1 -- set interface vxlan1
+       ovs-vsctl add-br br0
+       ovs-vsctl add-port br0 vxlan1 -- set interface vxlan1
        type=vxlan options:remote_ip=192.168.1.2 options:key=flow
        options:dst_port=8472
 
@@ -1257,14 +1278,16 @@ A: Before version 1.11, Open vSwitch did not support MPLS.  That is,
    packet.  Kernel datapath support is unchanged from earlier
    versions.
 
-   Open vSwitch version 2.3 can match, push, or pop up to 3 MPLS
-   labels.  Looking past MPLS labels into the encapsulated packet will
-   still be unsupported.  Both userspace and kernel datapaths will be
-   supported, but MPLS processing always happens in userspace either
-   way, so kernel datapath performance will be disappointing.
+   Open vSwitch version 2.3 can match, push, or pop a single MPLS
+   label and look past the MPLS label into the encapsulated packet.
+   Both userspace and kernel datapaths will be supported, but MPLS
+   processing always happens in userspace either way, so kernel
+   datapath performance will be disappointing.
 
-   Open vSwitch version 2.4 will have kernel support for MPLS,
-   yielding improved performance.
+   Open vSwitch version 2.4 can match, push, or pop up to 3 MPLS
+   labels and look past the MPLS label into the encapsulated packet.
+   It will have kernel support for MPLS, yielding improved
+   performance.
 
 ### Q: I'm getting "error type 45250 code 0".  What's that?
 
@@ -1619,6 +1642,47 @@ A: Reconfiguring your bridge can change your bridge's datapath-id because
    To avoid the behaviour, you can configure datapath-id manually.
 
       ovs-vsctl set bridge br0 other-config:datapath-id=0123456789abcdef
+
+### Q: My controller is getting errors about "buffers".  What's going on?
+
+A: When a switch sends a packet to an OpenFlow controller using a
+   "packet-in" message, it can also keep a copy of that packet in a
+   "buffer", identified by a 32-bit integer "buffer_id".  There are
+   two advantages to buffering.  First, when the controller wants to
+   tell the switch to do something with the buffered packet (with a
+   "packet-out" OpenFlow request), it does not need to send another
+   copy of the packet back across the OpenFlow connection, which
+   reduces the bandwidth cost of the connection and improves latency.
+   This enables the second advantage: the switch can optionally send
+   only the first part of the packet to the controller (assuming that
+   the switch only needs to look at the first few bytes of the
+   packet), further reducing bandwidth and improving latency.
+
+   However, buffering introduces some issues of its own.  First, any
+   switch has limited resources, so if the controller does not use a
+   buffered packet, the switch has to decide how long to keep it
+   buffered.  When many packets are sent to a controller and buffered,
+   Open vSwitch can discard buffered packets that the controller has
+   not used after as little as 5 seconds.  This means that
+   controllers, if they make use of packet buffering, should use the
+   buffered packets promptly.  (This includes sending a "packet-out"
+   with no actions if the controller does not want to do anything with
+   a buffered packet, to clear the packet buffer and effectively
+   "drop" its packet.)
+
+   Second, packet buffers are one-time-use, meaning that a controller
+   cannot use a single packet buffer in two or more "packet-out"
+   commands.  Open vSwitch will respond with an error to the second
+   and subsequent "packet-out"s in such a case.
+
+   Finally, a common error early in controller development is to try
+   to use buffer_id 0 in a "packet-out" message as if 0 represented
+   "no buffered packet".  This is incorrect usage: the buffer_id with
+   this meaning is actually 0xffffffff.
+
+   ovs-vswitchd(8) describes some details of Open vSwitch packet
+   buffering that the OpenFlow specification requires implementations
+   to document.
 
 
 Development

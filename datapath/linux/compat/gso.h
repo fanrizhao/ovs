@@ -2,17 +2,19 @@
 #define __LINUX_GSO_WRAPPER_H
 
 #include <linux/version.h>
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0) || \
+	!defined USE_UPSTREAM_VXLAN
 
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <net/protocol.h>
 
 #include "datapath.h"
+typedef void (*gso_fix_segment_t)(struct sk_buff *);
 
 struct ovs_gso_cb {
 	struct ovs_skb_cb dp_cb;
-	void (*fix_segment)(struct sk_buff *);
+	gso_fix_segment_t fix_segment;
 	sk_buff_data_t	inner_mac_header;	/* Offset from skb->head */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0)
 	__be16		inner_protocol;
@@ -65,7 +67,12 @@ static inline void skb_reset_inner_headers(struct sk_buff *skb)
 	OVS_GSO_CB(skb)->fix_segment = NULL;
 }
 
-#endif /* 3.12 */
+struct sk_buff *ovs_iptunnel_handle_offloads(struct sk_buff *skb,
+                                             bool csum_help,
+					     gso_fix_segment_t fix_segment);
+
+
+#endif /* 3.12 || !USE_UPSTREAM_VXLAN */
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
 #define ip_local_out rpl_ip_local_out

@@ -189,7 +189,7 @@ static int geneve_rcv(struct sock *sk, struct sk_buff *skb)
 
 	geneveh = geneve_hdr(skb);
 
-	flags = TUNNEL_KEY | TUNNEL_OPTIONS_PRESENT |
+	flags = TUNNEL_KEY | TUNNEL_GENEVE_OPT |
 		(udp_hdr(skb)->check != 0 ? TUNNEL_CSUM : 0) |
 		(geneveh->oam ? TUNNEL_OAM : 0) |
 		(geneveh->critical ? TUNNEL_CRIT_OPT : 0);
@@ -324,33 +324,36 @@ static void geneve_fix_segment(struct sk_buff *skb)
 	udph->len = htons(skb->len - skb_transport_offset(skb));
 }
 
-static int handle_offloads(struct sk_buff *skb)
+static struct sk_buff *handle_offloads(struct sk_buff *skb)
 {
-	if (skb_is_gso(skb))
-		OVS_GSO_CB(skb)->fix_segment = geneve_fix_segment;
-	else if (skb->ip_summed != CHECKSUM_PARTIAL)
-		skb->ip_summed = CHECKSUM_NONE;
-	return 0;
+	return ovs_iptunnel_handle_offloads(skb, false, geneve_fix_segment);
 }
 #else
-static int handle_offloads(struct sk_buff *skb)
+
+static struct sk_buff *handle_offloads(struct sk_buff *skb)
 {
-	if (skb->encapsulation && skb_is_gso(skb)) {
-		kfree_skb(skb);
-		return -ENOSYS;
-	}
+	int err = 0;
 
 	if (skb_is_gso(skb)) {
-		int err = skb_unclone(skb, GFP_ATOMIC);
+
+		if (skb_is_encapsulated(skb)) {
+			err = -ENOSYS;
+			goto error;
+		}
+
+		err = skb_unclone(skb, GFP_ATOMIC);
 		if (unlikely(err))
-			return err;
+			goto error;
 
 		skb_shinfo(skb)->gso_type |= SKB_GSO_UDP_TUNNEL;
 	} else if (skb->ip_summed != CHECKSUM_PARTIAL)
 		skb->ip_summed = CHECKSUM_NONE;
 
 	skb->encapsulation = 1;
-	return 0;
+	return skb;
+error:
+	kfree_skb(skb);
+	return ERR_PTR(err);
 }
 #endif
 
@@ -365,8 +368,10 @@ static int geneve_send(struct vport *vport, struct sk_buff *skb)
 	int sent_len;
 	int err;
 
-	if (unlikely(!OVS_CB(skb)->egress_tun_info))
-		return -EINVAL;
+	if (unlikely(!OVS_CB(skb)->egress_tun_info)) {
+		err = -EINVAL;
+		goto error;
+	}
 
 	tun_key = &OVS_CB(skb)->egress_tun_info->tunnel;
 
@@ -385,7 +390,7 @@ static int geneve_send(struct vport *vport, struct sk_buff *skb)
 			+ GENEVE_BASE_HLEN
 			+ OVS_CB(skb)->egress_tun_info->options_len
 			+ sizeof(struct iphdr)
-			+ (vlan_tx_tag_present(skb) ? VLAN_HLEN : 0);
+			+ (skb_vlan_tag_present(skb) ? VLAN_HLEN : 0);
 
 	if (skb_headroom(skb) < min_headroom || skb_header_cloned(skb)) {
 		int head_delta = SKB_DATA_ALIGN(min_headroom -
@@ -398,11 +403,12 @@ static int geneve_send(struct vport *vport, struct sk_buff *skb)
 			goto err_free_rt;
 	}
 
-	if (vlan_tx_tag_present(skb)) {
-		if (unlikely(!__vlan_put_tag(skb,
-					     skb->vlan_proto,
-					     vlan_tx_tag_get(skb)))) {
+	if (skb_vlan_tag_present(skb)) {
+		if (unlikely(!vlan_insert_tag_set_proto(skb,
+							skb->vlan_proto,
+							skb_vlan_tag_get(skb)))) {
 			err = -ENOMEM;
+			skb = NULL;
 			goto err_free_rt;
 		}
 		vlan_set_tci(skb, 0);
@@ -417,11 +423,18 @@ static int geneve_send(struct vport *vport, struct sk_buff *skb)
 	geneve_build_header(vport, skb);
 
 	/* Offloading */
-	err = handle_offloads(skb);
-	if (err)
+	skb = handle_offloads(skb);
+	if (IS_ERR(skb)) {
+		err = PTR_ERR(skb);
+		skb = NULL;
 		goto err_free_rt;
+	}
 
 	df = tun_key->tun_flags & TUNNEL_DONT_FRAGMENT ? htons(IP_DF) : 0;
+
+	/* NOTE: If geneve_xmit_skb() is backported, opts may only be passed
+	 * in if TUNNEL_GENEVE_OPT is set, see upstream.
+	 */
 
 	sent_len = iptunnel_xmit(skb->sk, rt, skb,
 			     saddr, tun_key->ipv4_dst,
@@ -434,6 +447,7 @@ static int geneve_send(struct vport *vport, struct sk_buff *skb)
 err_free_rt:
 	ip_rt_put(rt);
 error:
+	kfree_skb(skb);
 	return err;
 }
 

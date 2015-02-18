@@ -99,7 +99,7 @@ struct ofproto {
     struct hmap learned_cookies OVS_GUARDED_BY(ofproto_mutex);
 
     /* List of expirable flows, in all flow tables. */
-    struct list expirable OVS_GUARDED_BY(ofproto_mutex);
+    struct ovs_list expirable OVS_GUARDED_BY(ofproto_mutex);
 
     /* Meter table.
      * OpenFlow meters start at 1.  To avoid confusion we leave the first
@@ -362,7 +362,7 @@ struct rule {
     OVSRCU_TYPE(const struct rule_actions *) actions;
 
     /* In owning meter's 'rules' list.  An empty list if there is no meter. */
-    struct list meter_list_node OVS_GUARDED_BY(ofproto_mutex);
+    struct ovs_list meter_list_node OVS_GUARDED_BY(ofproto_mutex);
 
     /* Flow monitors (e.g. for NXST_FLOW_MONITOR, related to struct ofmonitor).
      *
@@ -375,7 +375,7 @@ struct rule {
 
     /* Optimisation for flow expiry.  In ofproto's 'expirable' list if this
      * rule is expirable, otherwise empty. */
-    struct list expirable OVS_GUARDED_BY(ofproto_mutex);
+    struct ovs_list expirable OVS_GUARDED_BY(ofproto_mutex);
 
     /* Times.  Last so that they are more likely close to the stats managed
      * by the provider. */
@@ -497,7 +497,7 @@ struct ofgroup {
     const long long int created;      /* Creation time. */
     const long long int modified;     /* Time of last modification. */
 
-    struct list buckets;        /* Contains "struct ofputil_bucket"s. */
+    struct ovs_list buckets;        /* Contains "struct ofputil_bucket"s. */
     const uint32_t n_buckets;
 };
 
@@ -1588,14 +1588,15 @@ struct ofproto_class {
 
     /* Configures multicast snooping port's flood setting on 'ofproto'.
      *
-     * All multicast traffic is sent to struct port 'aux' in 'ofproto'
-     * if 'flood' is true. Otherwise, struct port 'aux' is an ordinary
-     * switch port.
+     * If 's' is nonnull, this function updates multicast snooping
+     * configuration to 's' in 'ofproto'.
+     *
+     * If 's' is NULL, this function doesn't change anything.
      *
      * An implementation that does not support multicast snooping may set
      * it to NULL or return EOPNOTSUPP. */
     int (*set_mcast_snooping_port)(struct ofproto *ofproto_, void *aux,
-                                   bool flood);
+                          const struct ofproto_mcast_snooping_port_settings *s);
 
 /* Linux VLAN device support (e.g. "eth0.10" for VLAN 10.)
  *

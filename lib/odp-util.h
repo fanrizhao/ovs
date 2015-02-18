@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -114,6 +114,7 @@ void odp_portno_names_destroy(struct hmap *portno_names);
  *  - OVS_TUNNEL_KEY_ATTR_CSUM           0    --     4      4
  *  - OVS_TUNNEL_KEY_ATTR_OAM            0    --     4      4
  *  - OVS_TUNNEL_KEY_ATTR_GENEVE_OPTS    256  --     4      260
+ *  - OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS     -    --     -      - (shared with _GENEVE_OPTS)
  *  OVS_KEY_ATTR_IN_PORT                 4    --     4      8
  *  OVS_KEY_ATTR_SKB_MARK                4    --     4      8
  *  OVS_KEY_ATTR_DP_HASH                 4    --     4      8
@@ -133,7 +134,7 @@ void odp_portno_names_destroy(struct hmap *portno_names);
  * add another field and forget to adjust this value.
  */
 #define ODPUTIL_FLOW_KEY_BYTES 512
-BUILD_ASSERT_DECL(FLOW_WC_SEQ == 28);
+BUILD_ASSERT_DECL(FLOW_WC_SEQ == 31);
 
 /* A buffer with sufficient size and alignment to hold an nlattr-formatted flow
  * key.  An array of "struct nlattr" might not, in theory, be sufficiently
@@ -145,6 +146,7 @@ struct odputil_keybuf {
 enum odp_key_fitness odp_tun_key_from_attr(const struct nlattr *,
                                            struct flow_tnl *);
 
+int odp_ufid_from_string(const char *s_, ovs_u128 *ufid);
 void odp_format_ufid(const ovs_u128 *ufid, struct ds *);
 void odp_flow_format(const struct nlattr *key, size_t key_len,
                      const struct nlattr *mask, size_t mask_len,

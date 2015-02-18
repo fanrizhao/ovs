@@ -1,6 +1,8 @@
 #*#
 *.a
 *.d
+*.gcno
+*.gcda
 *.ko
 *.la
 *.lo
@@ -63,3 +65,4 @@ tags
 _debian
 odp-netlink.h
 OvsDpInterface.h
+/.vagrant/

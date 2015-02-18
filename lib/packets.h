@@ -41,6 +41,9 @@ struct flow_tnl {
     uint8_t ip_ttl;
     ovs_be16 tp_src;
     ovs_be16 tp_dst;
+    ovs_be16 gbp_id;
+    uint8_t  gbp_flags;
+    uint8_t  pad1[5];        /* Pad to 64 bits. */
 };
 
 /* Unfortunately, a "struct flow" sometimes has to handle OpenFlow port
@@ -518,7 +521,6 @@ struct icmp_header {
         } frag;
         ovs_16aligned_be32 gateway;
     } icmp_fields;
-    uint8_t icmp_data[0];
 };
 BUILD_ASSERT_DECL(ICMP_HEADER_LEN == sizeof(struct icmp_header));
 
@@ -643,9 +645,29 @@ struct icmp6_header {
     uint8_t icmp6_type;
     uint8_t icmp6_code;
     ovs_be16 icmp6_cksum;
-    uint8_t icmp6_data[0];
 };
 BUILD_ASSERT_DECL(ICMP6_HEADER_LEN == sizeof(struct icmp6_header));
+
+/* Neighbor Discovery option field.
+ * ND options are always a multiple of 8 bytes in size. */
+#define ND_OPT_LEN 8
+struct ovs_nd_opt {
+    uint8_t  nd_opt_type;      /* Values defined in icmp6.h */
+    uint8_t  nd_opt_len;       /* in units of 8 octets (the size of this struct) */
+    uint8_t  nd_opt_data[6];   /* Ethernet address in the case of SLL or TLL options */
+};
+BUILD_ASSERT_DECL(ND_OPT_LEN == sizeof(struct ovs_nd_opt));
+
+/* Like struct nd_msg (from ndisc.h), but whereas that struct requires 32-bit
+ * alignment, this one only requires 16-bit alignment. */
+#define ND_MSG_LEN 24
+struct ovs_nd_msg {
+    struct icmp6_header icmph;
+    ovs_16aligned_be32 rco_flags;
+    union ovs_16aligned_in6_addr target;
+    struct ovs_nd_opt options[0];
+};
+BUILD_ASSERT_DECL(ND_MSG_LEN == sizeof(struct ovs_nd_msg));
 
 /* The IPv6 flow label is in the lower 20 bits of the first 32-bit word. */
 #define IPV6_LABEL_MASK 0x000fffff
@@ -758,6 +780,8 @@ void packet_set_ipv6(struct ofpbuf *, uint8_t proto, const ovs_be32 src[4],
 void packet_set_tcp_port(struct ofpbuf *, ovs_be16 src, ovs_be16 dst);
 void packet_set_udp_port(struct ofpbuf *, ovs_be16 src, ovs_be16 dst);
 void packet_set_sctp_port(struct ofpbuf *, ovs_be16 src, ovs_be16 dst);
+void packet_set_nd(struct ofpbuf *, const ovs_be32 target[4],
+                   const uint8_t sll[6], const uint8_t tll[6]);
 
 void packet_format_tcp_flags(struct ds *, uint16_t);
 const char *packet_tcp_flag_to_string(uint32_t flag);

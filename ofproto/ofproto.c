@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2009-2015 Nicira, Inc.
  * Copyright (c) 2010 Jean Tourrilhes - HP-Labs.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -57,7 +57,7 @@
 #include "timeval.h"
 #include "unaligned.h"
 #include "unixctl.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 #include "bundles.h"
 
 #include "ofproto-blueswitch.h"
@@ -169,7 +169,7 @@ static enum ofperr collect_rules_loose(struct ofproto *,
  * (We can't do this immediately from ofopgroup_complete() because that holds
  * ofproto_mutex, which rule_execute() needs released.) */
 struct rule_execute {
-    struct list list_node;      /* In struct ofproto's "rule_executes" list. */
+    struct ovs_list list_node;  /* In struct ofproto's "rule_executes" list. */
     struct rule *rule;          /* Owns a reference to the rule. */
     ofp_port_t in_port;
     struct ofpbuf *packet;      /* Owns the packet. */
@@ -184,7 +184,7 @@ struct learned_cookie {
         struct hmap_node hmap_node OVS_GUARDED_BY(ofproto_mutex);
 
         /* In 'dead_cookies' list when removed from hmap. */
-        struct list list_node;
+        struct ovs_list list_node;
     } u;
 
     /* Key. */
@@ -204,9 +204,9 @@ static const struct ofpact_learn *next_learn_with_delete(
 static void learned_cookies_inc(struct ofproto *, const struct rule_actions *)
     OVS_REQUIRES(ofproto_mutex);
 static void learned_cookies_dec(struct ofproto *, const struct rule_actions *,
-                                struct list *dead_cookies)
+                                struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex);
-static void learned_cookies_flush(struct ofproto *, struct list *dead_cookies)
+static void learned_cookies_flush(struct ofproto *, struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex);
 
 /* ofport. */
@@ -724,15 +724,15 @@ ofproto_set_mcast_snooping(struct ofproto *ofproto,
             : EOPNOTSUPP);
 }
 
-/* Configures multicast snooping flood setting on 'ofp_port' of 'ofproto'.
+/* Configures multicast snooping flood settings on 'ofp_port' of 'ofproto'.
  *
  * Returns 0 if successful, otherwise a positive errno value.*/
 int
-ofproto_port_set_mcast_snooping(struct ofproto *ofproto, void *aux, bool flood)
+ofproto_port_set_mcast_snooping(struct ofproto *ofproto, void *aux,
+                           const struct ofproto_mcast_snooping_port_settings *s)
 {
     return (ofproto->ofproto_class->set_mcast_snooping_port
-            ? ofproto->ofproto_class->set_mcast_snooping_port(ofproto, aux,
-                                                              flood)
+            ? ofproto->ofproto_class->set_mcast_snooping_port(ofproto, aux, s)
             : EOPNOTSUPP);
 }
 
@@ -2756,7 +2756,7 @@ run_rule_executes(struct ofproto *ofproto)
     OVS_EXCLUDED(ofproto_mutex)
 {
     struct rule_execute *e, *next;
-    struct list executes;
+    struct ovs_list executes;
 
     guarded_list_pop_all(&ofproto->rule_executes, &executes);
     LIST_FOR_EACH_SAFE (e, next, list_node, &executes) {
@@ -2776,7 +2776,7 @@ static void
 destroy_rule_executes(struct ofproto *ofproto)
 {
     struct rule_execute *e, *next;
-    struct list executes;
+    struct ovs_list executes;
 
     guarded_list_pop_all(&ofproto->rule_executes, &executes);
     LIST_FOR_EACH_SAFE (e, next, list_node, &executes) {
@@ -2802,7 +2802,7 @@ hash_learned_cookie(ovs_be64 cookie_, uint8_t table_id)
 static void
 learned_cookies_update_one__(struct ofproto *ofproto,
                              const struct ofpact_learn *learn,
-                             int delta, struct list *dead_cookies)
+                             int delta, struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex)
 {
     uint32_t hash = hash_learned_cookie(learn->cookie, learn->table_id);
@@ -2853,7 +2853,7 @@ next_learn_with_delete(const struct rule_actions *actions,
 static void
 learned_cookies_update__(struct ofproto *ofproto,
                          const struct rule_actions *actions,
-                         int delta, struct list *dead_cookies)
+                         int delta, struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex)
 {
     if (actions->has_learn_with_delete) {
@@ -2877,14 +2877,14 @@ learned_cookies_inc(struct ofproto *ofproto,
 static void
 learned_cookies_dec(struct ofproto *ofproto,
                     const struct rule_actions *actions,
-                    struct list *dead_cookies)
+                    struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex)
 {
     learned_cookies_update__(ofproto, actions, -1, dead_cookies);
 }
 
 static void
-learned_cookies_flush(struct ofproto *ofproto, struct list *dead_cookies)
+learned_cookies_flush(struct ofproto *ofproto, struct ovs_list *dead_cookies)
     OVS_REQUIRES(ofproto_mutex)
 {
     struct learned_cookie *c, *next;
@@ -2939,10 +2939,15 @@ query_tables(struct ofproto *ofproto,
         atomic_read_relaxed(&ofproto->tables[i].miss_config, &f->miss_config);
         f->max_entries = 1000000;
 
-        bitmap_set_multiple(f->nonmiss.next, i + 1,
-                            ofproto->n_tables - (i + 1), true);
+        bool more_tables = false;
+        for (int j = i + 1; j < ofproto->n_tables; j++) {
+            if (!(ofproto->tables[j].flags & OFTABLE_HIDDEN)) {
+                bitmap_set1(f->nonmiss.next, j);
+                more_tables = true;
+            }
+        }
         f->nonmiss.instructions = (1u << N_OVS_INSTRUCTIONS) - 1;
-        if (i == ofproto->n_tables - 1) {
+        if (!more_tables) {
             f->nonmiss.instructions &= ~(1u << OVSINST_OFPIT11_GOTO_TABLE);
         }
         f->nonmiss.write.ofpacts = (UINT64_C(1) << N_OFPACTS) - 1;
@@ -2963,6 +2968,10 @@ query_tables(struct ofproto *ofproto,
 
             s->table_id = i;
             s->active_count = classifier_count(cls);
+            if (i == 0) {
+                s->active_count -= connmgr_count_hidden_rules(
+                    ofproto->connmgr);
+            }
         }
     } else {
         stats = NULL;
@@ -3106,7 +3115,7 @@ reject_slave_controller(struct ofconn *ofconn)
 {
     if (ofconn_get_type(ofconn) == OFCONN_PRIMARY
         && ofconn_get_role(ofconn) == OFPCR12_ROLE_SLAVE) {
-        return OFPERR_OFPBRC_EPERM;
+        return OFPERR_OFPBRC_IS_SLAVE;
     } else {
         return 0;
     }
@@ -3320,7 +3329,7 @@ handle_table_features_request(struct ofconn *ofconn,
 {
     struct ofproto *ofproto = ofconn_get_ofproto(ofconn);
     struct ofputil_table_features *features;
-    struct list replies;
+    struct ovs_list replies;
     struct ofpbuf msg;
     size_t i;
 
@@ -3346,7 +3355,7 @@ handle_table_features_request(struct ofconn *ofconn,
 }
 
 static void
-append_port_stat(struct ofport *port, struct list *replies)
+append_port_stat(struct ofport *port, struct ovs_list *replies)
 {
     struct ofputil_port_stats ops = { .port_no = port->pp.port_no };
 
@@ -3364,11 +3373,11 @@ append_port_stat(struct ofport *port, struct list *replies)
 static void
 handle_port_request(struct ofconn *ofconn,
                     const struct ofp_header *request, ofp_port_t port_no,
-                    void (*cb)(struct ofport *, struct list *replies))
+                    void (*cb)(struct ofport *, struct ovs_list *replies))
 {
     struct ofproto *ofproto = ofconn_get_ofproto(ofconn);
     struct ofport *port;
-    struct list replies;
+    struct ovs_list replies;
 
     ofpmp_init(&replies, request);
     if (port_no != OFPP_ANY) {
@@ -3400,7 +3409,7 @@ handle_port_stats_request(struct ofconn *ofconn,
 }
 
 static void
-append_port_desc(struct ofport *port, struct list *replies)
+append_port_desc(struct ofport *port, struct ovs_list *replies)
 {
     ofputil_append_port_desc_stats_reply(&port->pp, replies);
 }
@@ -3788,7 +3797,7 @@ handle_flow_stats_request(struct ofconn *ofconn,
     struct ofputil_flow_stats_request fsr;
     struct rule_criteria criteria;
     struct rule_collection rules;
-    struct list replies;
+    struct ovs_list replies;
     enum ofperr error;
     size_t i;
 
@@ -4019,7 +4028,7 @@ handle_aggregate_stats_request(struct ofconn *ofconn,
 
 struct queue_stats_cbdata {
     struct ofport *ofport;
-    struct list replies;
+    struct ovs_list replies;
     long long int now;
 };
 
@@ -4141,6 +4150,54 @@ evict_rules_from_table(struct oftable *table, unsigned int extra_space)
     rule_collection_destroy(&rules);
 
     return error;
+}
+
+static bool
+is_conjunction(const struct ofpact *ofpacts, size_t ofpacts_len)
+{
+    return ofpacts_len > 0 && ofpacts->type == OFPACT_CONJUNCTION;
+}
+
+static void
+get_conjunctions(const struct ofputil_flow_mod *fm,
+                 struct cls_conjunction **conjsp, size_t *n_conjsp)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    struct cls_conjunction *conjs = NULL;
+    int n_conjs = 0;
+
+    if (is_conjunction(fm->ofpacts, fm->ofpacts_len)) {
+        const struct ofpact *ofpact;
+        int i;
+
+        n_conjs = 0;
+        OFPACT_FOR_EACH (ofpact, fm->ofpacts, fm->ofpacts_len) {
+            n_conjs++;
+        }
+
+        conjs = xzalloc(n_conjs * sizeof *conjs);
+        i = 0;
+        OFPACT_FOR_EACH (ofpact, fm->ofpacts, fm->ofpacts_len) {
+            struct ofpact_conjunction *oc = ofpact_get_CONJUNCTION(ofpact);
+            conjs[i].clause = oc->clause;
+            conjs[i].n_clauses = oc->n_clauses;
+            conjs[i].id = oc->id;
+            i++;
+        }
+    }
+
+    *conjsp = conjs;
+    *n_conjsp = n_conjs;
+}
+
+static void
+set_conjunctions(struct rule *rule, const struct cls_conjunction *conjs,
+                 size_t n_conjs)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    struct cls_rule *cr = CONST_CAST(struct cls_rule *, &rule->cr);
+
+    cls_rule_set_conjunctions(cr, conjs, n_conjs);
 }
 
 /* Implements OFPFC_ADD and the cases for OFPFC_MODIFY and OFPFC_MODIFY_STRICT
@@ -4289,7 +4346,12 @@ add_flow(struct ofproto *ofproto, struct ofputil_flow_mod *fm,
     }
 
     classifier_defer(&table->cls);
-    classifier_insert(&table->cls, &rule->cr);
+
+    struct cls_conjunction *conjs;
+    size_t n_conjs;
+    get_conjunctions(fm, &conjs, &n_conjs);
+    classifier_insert(&table->cls, &rule->cr, conjs, n_conjs);
+    free(conjs);
 
     error = ofproto->ofproto_class->rule_insert(rule);
     if (error) {
@@ -4334,7 +4396,7 @@ modify_flows__(struct ofproto *ofproto, struct ofputil_flow_mod *fm,
                const struct flow_mod_requester *req)
     OVS_REQUIRES(ofproto_mutex)
 {
-    struct list dead_cookies = LIST_INITIALIZER(&dead_cookies);
+    struct ovs_list dead_cookies = OVS_LIST_INITIALIZER(&dead_cookies);
     enum nx_flow_update_event event;
     size_t i;
 
@@ -4401,8 +4463,43 @@ modify_flows__(struct ofproto *ofproto, struct ofputil_flow_mod *fm,
         }
 
         if (change_actions) {
+           /* We have to change the actions.  The rule's conjunctive match set
+            * is a function of its actions, so we need to update that too.  The
+            * conjunctive match set is used in the lookup process to figure
+            * which (if any) collection of conjunctive sets the packet matches
+            * with.  However, a rule with conjunction actions is never to be
+            * returned as a classifier lookup result.  To make sure a rule with
+            * conjunction actions is not returned as a lookup result, we update
+            * them in a carefully chosen order:
+            *
+            * - If we're adding a conjunctive match set where there wasn't one
+            *   before, we have to make the conjunctive match set available to
+            *   lookups before the rule's actions are changed, as otherwise
+            *   rule with a conjunction action could be returned as a lookup
+            *   result.
+            *
+            * - To clear some nonempty conjunctive set, we set the rule's
+            *   actions first, so that a lookup can't return a rule with
+            *   conjunction actions.
+            *
+            * - Otherwise, order doesn't matter for changing one nonempty
+            *   conjunctive match set to some other nonempty set, since the
+            *   rule's actions are not seen by the classifier, and hence don't
+            *   matter either before or after the change. */
+            struct cls_conjunction *conjs;
+            size_t n_conjs;
+            get_conjunctions(fm, &conjs, &n_conjs);
+
+            if (n_conjs) {
+                set_conjunctions(rule, conjs, n_conjs);
+            }
             ovsrcu_set(&rule->actions, rule_actions_create(fm->ofpacts,
                                                            fm->ofpacts_len));
+            if (!conjs) {
+                set_conjunctions(rule, conjs, n_conjs);
+            }
+
+            free(conjs);
         }
 
         if (change_actions || reset_counters) {
@@ -4515,7 +4612,7 @@ delete_flows__(const struct rule_collection *rules,
     OVS_REQUIRES(ofproto_mutex)
 {
     if (rules->n) {
-        struct list dead_cookies = LIST_INITIALIZER(&dead_cookies);
+        struct ovs_list dead_cookies = OVS_LIST_INITIALIZER(&dead_cookies);
         struct ofproto *ofproto = rules->rules[0]->ofproto;
         struct rule *rule, *next;
         size_t i;
@@ -4932,7 +5029,7 @@ handle_barrier_request(struct ofconn *ofconn, const struct ofp_header *oh)
 static void
 ofproto_compose_flow_refresh_update(const struct rule *rule,
                                     enum nx_flow_monitor_flags flags,
-                                    struct list *msgs)
+                                    struct ovs_list *msgs)
     OVS_REQUIRES(ofproto_mutex)
 {
     const struct rule_actions *actions;
@@ -4964,7 +5061,7 @@ ofproto_compose_flow_refresh_update(const struct rule *rule,
 
 void
 ofmonitor_compose_refresh_updates(struct rule_collection *rules,
-                                  struct list *msgs)
+                                  struct ovs_list *msgs)
     OVS_REQUIRES(ofproto_mutex)
 {
     size_t i;
@@ -5081,7 +5178,7 @@ handle_flow_monitor_request(struct ofconn *ofconn, const struct ofp_header *oh)
     struct ofmonitor **monitors;
     size_t n_monitors, allocated_monitors;
     struct rule_collection rules;
-    struct list replies;
+    struct ovs_list replies;
     enum ofperr error;
     struct ofpbuf b;
     size_t i;
@@ -5174,7 +5271,7 @@ handle_flow_monitor_cancel(struct ofconn *ofconn, const struct ofp_header *oh)
  */
 struct meter {
     long long int created;      /* Time created. */
-    struct list rules;          /* List of "struct rule_dpif"s. */
+    struct ovs_list rules;      /* List of "struct rule_dpif"s. */
     ofproto_meter_id provider_meter_id;
     uint16_t flags;             /* Meter flags. */
     uint16_t n_bands;           /* Number of meter bands. */
@@ -5427,7 +5524,7 @@ handle_meter_request(struct ofconn *ofconn, const struct ofp_header *request,
                      enum ofptype type)
 {
     struct ofproto *ofproto = ofconn_get_ofproto(ofconn);
-    struct list replies;
+    struct ovs_list replies;
     uint64_t bands_stub[256 / 8];
     struct ofpbuf bands;
     uint32_t meter_id, first, last;
@@ -5577,7 +5674,7 @@ group_get_ref_count(struct ofgroup *group)
 }
 
 static void
-append_group_stats(struct ofgroup *group, struct list *replies)
+append_group_stats(struct ofgroup *group, struct ovs_list *replies)
 {
     struct ofputil_group_stats ogs;
     const struct ofproto *ofproto = group->ofproto;
@@ -5611,11 +5708,11 @@ append_group_stats(struct ofgroup *group, struct list *replies)
 static void
 handle_group_request(struct ofconn *ofconn,
                      const struct ofp_header *request, uint32_t group_id,
-                     void (*cb)(struct ofgroup *, struct list *replies))
+                     void (*cb)(struct ofgroup *, struct ovs_list *replies))
 {
     struct ofproto *ofproto = ofconn_get_ofproto(ofconn);
     struct ofgroup *group;
-    struct list replies;
+    struct ovs_list replies;
 
     ofpmp_init(&replies, request);
     if (group_id == OFPG_ALL) {
@@ -5650,7 +5747,7 @@ handle_group_stats_request(struct ofconn *ofconn,
 }
 
 static void
-append_group_desc(struct ofgroup *group, struct list *replies)
+append_group_desc(struct ofgroup *group, struct ovs_list *replies)
 {
     struct ofputil_group_desc gds;
 
@@ -6131,6 +6228,11 @@ handle_bundle_control(struct ofconn *ofconn, const struct ofp_header *oh)
     struct ofpbuf *buf;
     struct ofputil_bundle_ctrl_msg reply;
 
+    error = reject_slave_controller(ofconn);
+    if (error) {
+        return error;
+    }
+
     error = ofputil_decode_bundle_ctrl(oh, &bctrl);
     if (error) {
         return error;
@@ -6177,6 +6279,11 @@ handle_bundle_add(struct ofconn *ofconn, const struct ofp_header *oh)
 {
     enum ofperr error;
     struct ofputil_bundle_add_msg badd;
+
+    error = reject_slave_controller(ofconn);
+    if (error) {
+        return error;
+    }
 
     error = ofputil_decode_bundle_add(oh, &badd);
     if (error) {
@@ -6687,7 +6794,7 @@ static void
 oftable_init(struct oftable *table)
 {
     memset(table, 0, sizeof *table);
-    classifier_init(&table->cls, flow_segment_u32s);
+    classifier_init(&table->cls, flow_segment_u64s);
     table->max_flows = UINT_MAX;
     atomic_init(&table->miss_config, OFPUTIL_TABLE_MISS_DEFAULT);
 

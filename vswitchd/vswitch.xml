@@ -1419,7 +1419,14 @@
       <column name="other_config" key="mcast-snooping-flood"
               type='{"type": "boolean"}'>
         <p>
-          If set to <code>true</code>, multicast packets are unconditionally
+          If set to <code>true</code>, multicast packets (except Reports) are
+          unconditionally forwarded to the specific port.
+        </p>
+      </column>
+      <column name="other_config" key="mcast-snooping-flood-reports"
+              type='{"type": "boolean"}'>
+        <p>
+          If set to <code>true</code>, multicast Reports are unconditionally
           forwarded to the specific port.
         </p>
       </column>
@@ -1896,6 +1903,26 @@
         outer headers to allow path MTU discovery. Default is enabled; set
         to <code>false</code> to disable.
       </column>
+
+      <group title="Tunnel Options: vxlan only">
+
+      <column name="options" key="exts">
+        <p>Optional.  Comma separated list of optional VXLAN extensions to
+           enable. The following extensions are supported:</p>
+
+        <ul>
+          <li>
+            <code>gbp</code>: VXLAN-GBP allows to transport the group policy
+            context of a packet across the VXLAN tunnel to other network
+            peers. See the field description of <code>tun_gbp_id</code> and
+            <code>tun_gbp_flags</code> in ovs-ofctl(8) for additional
+            information.
+            (<code>https://tools.ietf.org/html/draft-smith-vxlan-group-policy</code>)
+          </li>
+        </ul>
+      </column>
+
+	  </group>
 
       <group title="Tunnel Options: gre and ipsec_gre only">
         <p>

@@ -26,7 +26,6 @@
 #include "User.h"
 #include "Datapath.h"
 #include "Jhash.h"
-#include "Switch.h"
 #include "Vport.h"
 #include "Event.h"
 #include "User.h"
@@ -354,19 +353,35 @@ PNDIS_SPIN_LOCK gOvsCtrlLock;
 VOID
 OvsInit()
 {
+    HANDLE handle = NULL;
+
     gOvsCtrlLock = &ovsCtrlLockObj;
     NdisAllocateSpinLock(gOvsCtrlLock);
     OvsInitEventQueue();
+
+    OvsTunnelEngineOpen(&handle);
+    if (handle) {
+        OvsTunnelAddSystemProvider(handle);
+    }
+    OvsTunnelEngineClose(&handle);
 }
 
 VOID
 OvsCleanup()
 {
+    HANDLE handle = NULL;
+
     OvsCleanupEventQueue();
     if (gOvsCtrlLock) {
         NdisFreeSpinLock(gOvsCtrlLock);
         gOvsCtrlLock = NULL;
     }
+
+    OvsTunnelEngineOpen(&handle);
+    if (handle) {
+        OvsTunnelRemoveSystemProvider(handle);
+    }
+    OvsTunnelEngineClose(&handle);
 }
 
 VOID
@@ -433,10 +448,8 @@ OvsCreateDeviceObject(NDIS_HANDLE ovsExtDriverHandle)
         if (ovsExt) {
             ovsExt->numberOpenInstance = 0;
         }
-    } else {
-        /* Initialize the associated data structures. */
-        OvsInit();
     }
+
     OVS_LOG_TRACE("DeviceObject: %p", gOvsDeviceObject);
     return status;
 }
@@ -459,7 +472,6 @@ OvsDeleteDeviceObject()
         gOvsDeviceHandle = NULL;
         gOvsDeviceObject = NULL;
     }
-    OvsCleanup();
 }
 
 POVS_OPEN_INSTANCE
@@ -1324,7 +1336,7 @@ cleanup:
         POVS_MESSAGE_ERROR msgError = (POVS_MESSAGE_ERROR)
             usrParamsCtx->outputBuffer;
 
-        BuildErrorMsg(msgIn, msgError, nlError);
+        NlBuildErrorMsg(msgIn, msgError, nlError);
         *replyLen = msgError->nlMsg.nlmsgLen;
     }
 
@@ -1406,7 +1418,7 @@ OvsPortFillInfo(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
                 PNL_BUFFER nlBuf)
 {
     NTSTATUS status;
-    BOOLEAN rc;
+    BOOLEAN ok;
     OVS_MESSAGE msgOutTmp;
     PNL_MSG_HDR nlMsg;
     POVS_VPORT_ENTRY vport;
@@ -1435,8 +1447,8 @@ OvsPortFillInfo(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
     }
     msgOutTmp.ovsHdr.dp_ifindex = gOvsSwitchContext->dpNo;
 
-    rc = NlMsgPutHead(nlBuf, (PCHAR)&msgOutTmp, sizeof msgOutTmp);
-    if (!rc) {
+    ok = NlMsgPutHead(nlBuf, (PCHAR)&msgOutTmp, sizeof msgOutTmp);
+    if (!ok) {
         status = STATUS_INVALID_BUFFER_SIZE;
         goto cleanup;
     }
@@ -1447,10 +1459,12 @@ OvsPortFillInfo(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
         goto cleanup;
     }
 
-    rc = NlMsgPutTailU32(nlBuf, OVS_VPORT_ATTR_PORT_NO, eventEntry->portNo) ||
-         NlMsgPutTailU32(nlBuf, OVS_VPORT_ATTR_TYPE, vport->ovsType) ||
+    ok = NlMsgPutTailU32(nlBuf, OVS_VPORT_ATTR_PORT_NO, eventEntry->portNo) &&
+         NlMsgPutTailU32(nlBuf, OVS_VPORT_ATTR_TYPE, vport->ovsType) &&
+         NlMsgPutTailU32(nlBuf, OVS_VPORT_ATTR_UPCALL_PID,
+                         vport->upcallPid) &&
          NlMsgPutTailString(nlBuf, OVS_VPORT_ATTR_NAME, vport->ovsName);
-    if (!rc) {
+    if (!ok) {
         status = STATUS_INVALID_BUFFER_SIZE;
         goto cleanup;
     }

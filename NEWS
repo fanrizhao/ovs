@@ -1,5 +1,11 @@
 Post-v2.3.0
 ---------------------
+   - The MAC learning feature now includes per-port fairness to mitigate
+     MAC flooding attacks.
+   - New support for a "conjunctive match" OpenFlow extension, which
+     allows constructing OpenFlow matches of the form "field1 in
+     {a,b,c...} AND field2 in {d,e,f...}" and generalizations.  For details,
+     see documentation for the "conjunction" action in ovs-ofctl(8).
    - Add bash command-line completion support for ovs-appctl/ovs-dpctl/
      ovs-ofctl/ovsdb-tool commands.  Please check
      utilities/ovs-command-compgen.INSTALL.md for how to use.
@@ -12,12 +18,13 @@ Post-v2.3.0
      http://tools.ietf.org/html/draft-gross-geneve-00
    - The OVS database now reports controller rate limiting statistics.
    - sflow now exports information about LACP-based bonds, port names, and
-     OpenFlow port numbers.
+     OpenFlow port numbers, as well as datapath performance counters.
    - ovs-dpctl functionality is now available for datapaths integrated
      into ovs-vswitchd, via ovs-appctl.  Some existing ovs-appctl
      commands are now redundant and will be removed in a future
      release.  See ovs-vswitchd(8) for details.
    - OpenFlow:
+     * IPv6 flow label and neighbor discovery fields are now modifiable.
      * OpenFlow 1.5 (draft) extended registers are now supported.
      * The OpenFlow 1.5 (draft) actset_output field is now supported.
      * OpenFlow 1.5 (draft) Copy-Field action is now supported.
@@ -52,6 +59,11 @@ Post-v2.3.0
    - Added support for DPDK Tunneling. VXLAN and GRE are supported protocols.
      This is generic tunneling mechanism for userspace datapath.
    - Support for multicast snooping (IGMPv1 and IGMPv2)
+   - Support for Linux kernels up to 3.19.x
+   - The documentation now use the term 'destination' to mean one of syslog,
+     console or file for vlog logging instead of the previously used term
+     'facility'.
+   - Support for VXLAN Group Policy extension
 
 
 v2.3.0 - 14 Aug 2014
@@ -134,6 +146,7 @@ v2.1.0 - 19 Mar 2014
      * ovs-vswitchd now honors changes to the "ofport_request" column
        in the Interface table by changing the port's OpenFlow port
        number.
+     * The Open vSwitch software switch now supports OpenFlow groups.
    - ovs-vswitchd.conf.db.5 man page will contain graphviz/dot
      diagram only if graphviz package was installed at the build time.
    - Support for Linux kernels up to 3.11

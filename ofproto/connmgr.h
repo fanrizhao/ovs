@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ enum ofproto_packet_in_miss_type {
 /* A packet_in, with extra members to assist in queuing and routing it. */
 struct ofproto_packet_in {
     struct ofputil_packet_in up;
-    struct list list_node;      /* For queuing. */
+    struct ovs_list list_node;  /* For queuing. */
     uint16_t controller_id;     /* Controller ID to send to. */
     int send_len;               /* Length that the action requested sending. */
     enum ofproto_packet_in_miss_type miss_type;
@@ -149,7 +149,7 @@ void ofconn_get_async_config(struct ofconn *,
                              uint32_t *slave_masks);
 
 void ofconn_send_reply(const struct ofconn *, struct ofpbuf *);
-void ofconn_send_replies(const struct ofconn *, struct list *);
+void ofconn_send_replies(const struct ofconn *, struct ovs_list *);
 void ofconn_send_error(const struct ofconn *, const struct ofp_header *request,
                        enum ofperr);
 
@@ -193,6 +193,8 @@ bool connmgr_has_in_band(struct connmgr *);
 /* Fail-open and in-band implementation. */
 void connmgr_flushed(struct connmgr *);
 
+int connmgr_count_hidden_rules(const struct connmgr *);
+
 /* A flow monitor managed by NXST_FLOW_MONITOR and related requests. */
 struct ofmonitor {
     struct ofconn *ofconn;      /* Owning 'ofconn'. */
@@ -230,7 +232,7 @@ void ofmonitor_collect_resume_rules(struct ofmonitor *, uint64_t seqno,
                                     struct rule_collection *)
     OVS_REQUIRES(ofproto_mutex);
 void ofmonitor_compose_refresh_updates(struct rule_collection *rules,
-                                       struct list *msgs)
+                                       struct ovs_list *msgs)
     OVS_REQUIRES(ofproto_mutex);
 
 #endif /* connmgr.h */

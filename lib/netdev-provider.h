@@ -57,7 +57,7 @@ struct netdev {
     int n_rxq;
     int ref_cnt;                        /* Times this devices was opened. */
     struct shash_node *node;            /* Pointer to element in global map. */
-    struct list saved_flags_list; /* Contains "struct netdev_saved_flags". */
+    struct ovs_list saved_flags_list; /* Contains "struct netdev_saved_flags". */
 };
 
 static void
@@ -384,7 +384,7 @@ struct netdev_class {
 
     /* Forces ->get_carrier() to poll 'netdev''s MII registers for link status
      * instead of checking 'netdev''s carrier.  'netdev''s MII registers will
-     * be polled once ever 'interval' milliseconds.  If 'netdev' does not
+     * be polled once every 'interval' milliseconds.  If 'netdev' does not
      * support MII, another method may be used as a fallback.  If 'interval' is
      * less than or equal to zero, reverts ->get_carrier() to its normal
      * behavior.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,21 +14,23 @@
  * limitations under the License.
  */
 
-#ifndef VCONN_H
-#define VCONN_H 1
+#ifndef OPENVSWITCH_VCONN_H
+#define OPENVSWITCH_VCONN_H 1
 
 #include <stdbool.h>
-#include "openvswitch/types.h"
-#include "openflow/openflow.h"
+#include <openvswitch/list.h>
+#include <openvswitch/types.h>
+#include <openflow/openflow.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct list;
 struct ofpbuf;
 struct pvconn;
+struct pvconn_class;
 struct vconn;
+struct vconn_class;
 
 void vconn_usage(bool active, bool passive, bool bootstrap);
 
@@ -51,7 +53,7 @@ int vconn_send(struct vconn *, struct ofpbuf *);
 int vconn_recv_xid(struct vconn *, ovs_be32 xid, struct ofpbuf **);
 int vconn_transact(struct vconn *, struct ofpbuf *, struct ofpbuf **);
 int vconn_transact_noreply(struct vconn *, struct ofpbuf *, struct ofpbuf **);
-int vconn_transact_multiple_noreply(struct vconn *, struct list *requests,
+int vconn_transact_multiple_noreply(struct vconn *, struct ovs_list *requests,
                                     struct ofpbuf **replyp);
 
 void vconn_run(struct vconn *);

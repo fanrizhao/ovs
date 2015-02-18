@@ -23,8 +23,8 @@
 #include "ofpbuf.h"
 #include "timeval.h"
 #include "util.h"
-#include "vconn.h"
-#include "vlog.h"
+#include "openvswitch/vconn.h"
+#include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(pktbuf);
 
@@ -184,7 +184,8 @@ pktbuf_retrieve(struct pktbuf *pb, uint32_t id, struct ofpbuf **bufferp,
     if (!pb) {
         VLOG_WARN_RL(&rl, "attempt to send buffered packet via connection "
                      "without buffers");
-        return OFPERR_OFPBRC_BUFFER_UNKNOWN;
+        error = OFPERR_OFPBRC_BUFFER_UNKNOWN;
+        goto error;
     }
 
     p = &pb->packets[id & PKTBUF_MASK];

@@ -81,9 +81,27 @@ Using the DPDK with ovs-vswitchd:
    `default_hugepagesz=1GB hugepagesz=1G hugepages=1`
 
 2. Setup DPDK devices:
-   1. insert uio.ko: `modprobe uio`
-   2. insert igb_uio.ko: `insmod $DPDK_BUILD/kmod/igb_uio.ko`
-   3. Bind network device to igb_uio: `$DPDK_DIR/tools/dpdk_nic_bind.py --bind=igb_uio eth1`
+
+   DPDK devices can be setup using either the VFIO (for DPDK 1.7+) or UIO
+   modules. UIO requires inserting an out of tree driver igb_uio.ko that is
+   available in DPDK. Setup for both methods are described below.
+
+   * UIO:
+     1. insert uio.ko: `modprobe uio`
+     2. insert igb_uio.ko: `insmod $DPDK_BUILD/kmod/igb_uio.ko`
+     3. Bind network device to igb_uio:
+	    `$DPDK_DIR/tools/dpdk_nic_bind.py --bind=igb_uio eth1`
+
+   * VFIO:
+
+     VFIO needs to be supported in the kernel and the BIOS. More information
+     can be found in the [DPDK Linux GSG].
+
+     1. Insert vfio-pci.ko: `modprobe vfio-pci`
+     2. Set correct permissions on vfio device: `sudo /usr/bin/chmod a+x /dev/vfio`
+        and: `sudo /usr/bin/chmod 0666 /dev/vfio/*`
+     3. Bind network device to vfio-pci:
+	    `$DPDK_DIR/tools/dpdk_nic_bind.py --bind=vfio-pci eth1`
 
 3. Mount the hugetable filsystem
 
@@ -91,35 +109,33 @@ Using the DPDK with ovs-vswitchd:
 
    Ref to http://www.dpdk.org/doc/quick-start for verifying DPDK setup.
 
-4. Start ovsdb-server as discussed in [INSTALL.md] doc:
+4. Follow the instructions in [INSTALL.md] to install only the
+   userspace daemons and utilities (via 'make install').
    1. First time only db creation (or clearing):
 
-        ```
-        mkdir -p /usr/local/etc/openvswitch
-        mkdir -p /usr/local/var/run/openvswitch
-        rm /usr/local/etc/openvswitch/conf.db
-        cd $OVS_DIR
-        ./ovsdb/ovsdb-tool create /usr/local/etc/openvswitch/conf.db \
-             ./vswitchd/vswitch.ovsschema
-        ```
+      ```
+      mkdir -p /usr/local/etc/openvswitch
+      mkdir -p /usr/local/var/run/openvswitch
+      rm /usr/local/etc/openvswitch/conf.db
+      ovsdb-tool create /usr/local/etc/openvswitch/conf.db  \
+             /usr/local/share/openvswitch/vswitch.ovsschema
+      ```
 
-    2. start ovsdb-server
+   2. Start ovsdb-server
 
-        ```
-        cd $OVS_DIR
-        ./ovsdb/ovsdb-server --remote=punix:/usr/local/var/run/openvswitch/db.sock \
+      ```
+      ovsdb-server --remote=punix:/usr/local/var/run/openvswitch/db.sock \
           --remote=db:Open_vSwitch,Open_vSwitch,manager_options \
           --private-key=db:Open_vSwitch,SSL,private_key \
           --certificate=Open_vSwitch,SSL,certificate \
           --bootstrap-ca-cert=db:Open_vSwitch,SSL,ca_cert --pidfile --detach
-        ```
+      ```
 
     3. First time after db creation, initialize:
 
-        ```
-        cd $OVS_DIR
-        ./utilities/ovs-vsctl --no-wait init
-        ```
+       ```
+       ovs-vsctl --no-wait init
+       ```
 
 5. Start vswitchd:
 
@@ -128,32 +144,38 @@ Using the DPDK with ovs-vswitchd:
    dpdk arg -c is ignored by ovs-dpdk, but it is a required parameter
    for dpdk initialization.
 
-        export DB_SOCK=/usr/local/var/run/openvswitch/db.sock
-        ./vswitchd/ovs-vswitchd --dpdk -c 0x1 -n 4 -- unix:$DB_SOCK --pidfile --detach
+   ```
+   export DB_SOCK=/usr/local/var/run/openvswitch/db.sock
+   ovs-vswitchd --dpdk -c 0x1 -n 4 -- unix:$DB_SOCK --pidfile --detach
+   ```
 
-   If allocated more than one GB hugepage (as for IVSHMEM), set amount and use NUMA
-   node 0 memory:
+   If allocated more than one GB hugepage (as for IVSHMEM), set amount and
+   use NUMA node 0 memory:
 
-        ./vswitchd/ovs-vswitchd --dpdk -c 0x1 -n 4 --socket-mem 1024,0 \
-          -- unix:$DB_SOCK --pidfile --detach
+   ```
+   ovs-vswitchd --dpdk -c 0x1 -n 4 --socket-mem 1024,0 \
+   -- unix:$DB_SOCK --pidfile --detach
+   ```
 
 6. Add bridge & ports
           
    To use ovs-vswitchd with DPDK, create a bridge with datapath_type
    "netdev" in the configuration database.  For example:
 
-        `ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev`
+   `ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev`
 
    Now you can add dpdk devices. OVS expect DPDK device name start with dpdk
-   and end with portid. vswitchd should print (in the log file) the number of dpdk
-   devices found.
+   and end with portid. vswitchd should print (in the log file) the number
+   of dpdk devices found.
 
-        ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk
-        ovs-vsctl add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk
+   ```
+   ovs-vsctl add-port br0 dpdk0 -- set Interface dpdk0 type=dpdk
+   ovs-vsctl add-port br0 dpdk1 -- set Interface dpdk1 type=dpdk
+   ```
 
-    Once first DPDK port is added to vswitchd, it creates a Polling thread and
-    polls dpdk device in continuous loop. Therefore CPU utilization
-    for that thread is always 100%.
+   Once first DPDK port is added to vswitchd, it creates a Polling thread and
+   polls dpdk device in continuous loop. Therefore CPU utilization
+   for that thread is always 100%.
 
 7. Add test flows
 
@@ -180,14 +202,14 @@ Using the DPDK with ovs-vswitchd:
    interfaces on the same numa node.  The following two commands can be used
    to configure the multi-threading behavior.
 
-        ovs-vsctl set Open_vSwitch . other_config:pmd-cpu-mask=<hex string>
+   `ovs-vsctl set Open_vSwitch . other_config:pmd-cpu-mask=<hex string>`
 
-   The command above asks for a CPU mask for setting the affinity of pmd threads.
-   A set bit in the mask means a pmd thread is created and pinned to the
-   corresponding CPU core.  For more information, please refer to
+   The command above asks for a CPU mask for setting the affinity of pmd
+   threads.  A set bit in the mask means a pmd thread is created and pinned
+   to the corresponding CPU core.  For more information, please refer to
    `man ovs-vswitchd.conf.db`
 
-        ovs-vsctl set Open_vSwitch . other_config:n-dpdk-rxqs=<integer>
+   `ovs-vsctl set Open_vSwitch . other_config:n-dpdk-rxqs=<integer>`
 
    The command above sets the number of rx queues of each DPDK interface. The
    rx queues are assigned to pmd threads on the same numa node in round-robin
@@ -208,12 +230,14 @@ Using the DPDK with ovs-vswitchd:
 
    Configure pmd threads on core 4,6,8,10 using 'pmd-cpu-mask':
 
-        ovs-vsctl set Open_vSwitch . other_config:pmd-cpu-mask=00000550
+   `ovs-vsctl set Open_vSwitch . other_config:pmd-cpu-mask=00000550`
 
    You should be able to check that pmd threads are pinned to the correct cores
    via:
 
-        top -p `pidof ovs-vswitchd` -H -d1
+   ```
+   top -p `pidof ovs-vswitchd` -H -d1
+   ```
 
    Note, the pmd threads on a numa node are only created if there is at least
    one DPDK interface from the numa node that has been added to OVS.
@@ -228,7 +252,7 @@ Following the steps above to create a bridge, you can now add dpdk rings
 as a port to the vswitch.  OVS will expect the DPDK ring device name to
 start with dpdkr and end with a portid.
 
-    ovs-vsctl add-port br0 dpdkr0 -- set Interface dpdkr0 type=dpdkr
+`ovs-vsctl add-port br0 dpdkr0 -- set Interface dpdkr0 type=dpdkr`
 
 DPDK rings client test application
 
@@ -240,8 +264,10 @@ location tests/ovs_client
 
 To run the client :
 
-    cd /usr/src/ovs/tests/
-    ovsclient -c 1 -n 4 --proc-type=secondary -- -n "port id you gave dpdkr"
+```
+cd /usr/src/ovs/tests/
+ovsclient -c 1 -n 4 --proc-type=secondary -- -n "port id you gave dpdkr"
+```
 
 In the case of the dpdkr example above the "port id you gave dpdkr" is 0.
 
@@ -284,3 +310,4 @@ Please report problems to bugs@openvswitch.org.
 
 [INSTALL.userspace.md]:INSTALL.userspace.md
 [INSTALL.md]:INSTALL.md
+[DPDK Linux GSG]: http://www.dpdk.org/doc/guides/linux_gsg/build_dpdk.html#binding-and-unbinding-network-ports-to-from-the-igb-uioor-vfio-modules

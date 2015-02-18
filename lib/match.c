@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,6 +86,13 @@ match_set_recirc_id(struct match *match, uint32_t value)
 {
     match->flow.recirc_id = value;
     match->wc.masks.recirc_id = UINT32_MAX;
+}
+
+void
+match_set_conj_id(struct match *match, uint32_t value)
+{
+    match->flow.conj_id = value;
+    match->wc.masks.conj_id = UINT32_MAX;
 }
 
 void
@@ -215,6 +222,32 @@ match_set_tun_flags_masked(struct match *match, uint16_t flags, uint16_t mask)
 {
     match->wc.masks.tunnel.flags = mask;
     match->flow.tunnel.flags = flags & mask;
+}
+
+void
+match_set_tun_gbp_id_masked(struct match *match, ovs_be16 gbp_id, ovs_be16 mask)
+{
+    match->wc.masks.tunnel.gbp_id = mask;
+    match->flow.tunnel.gbp_id = gbp_id & mask;
+}
+
+void
+match_set_tun_gbp_id(struct match *match, ovs_be16 gbp_id)
+{
+    match_set_tun_gbp_id_masked(match, gbp_id, OVS_BE16_MAX);
+}
+
+void
+match_set_tun_gbp_flags_masked(struct match *match, uint8_t flags, uint8_t mask)
+{
+    match->wc.masks.tunnel.gbp_flags = mask;
+    match->flow.tunnel.gbp_flags = flags & mask;
+}
+
+void
+match_set_tun_gbp_flags(struct match *match, uint8_t flags)
+{
+    match_set_tun_gbp_flags_masked(match, flags, UINT8_MAX);
 }
 
 void
@@ -845,6 +878,15 @@ format_flow_tunnel(struct ds *s, const struct match *match)
     format_ip_netmask(s, "tun_src", tnl->ip_src, wc->masks.tunnel.ip_src);
     format_ip_netmask(s, "tun_dst", tnl->ip_dst, wc->masks.tunnel.ip_dst);
 
+    if (wc->masks.tunnel.gbp_id) {
+        format_be16_masked(s, "tun_gbp_id", tnl->gbp_id,
+                           wc->masks.tunnel.gbp_id);
+    }
+
+    if (wc->masks.tunnel.gbp_flags) {
+        ds_put_format(s, "tun_gbp_flags=%#"PRIx8",", tnl->gbp_flags);
+    }
+
     if (wc->masks.tunnel.ip_tos) {
         ds_put_format(s, "tun_tos=%"PRIx8",", tnl->ip_tos);
     }
@@ -870,7 +912,7 @@ match_format(const struct match *match, struct ds *s, int priority)
 
     int i;
 
-    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 28);
+    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 31);
 
     if (priority != OFP_DEFAULT_PRIORITY) {
         ds_put_format(s, "priority=%d,", priority);
@@ -886,6 +928,10 @@ match_format(const struct match *match, struct ds *s, int priority)
     if (f->dp_hash && wc->masks.dp_hash) {
         format_uint32_masked(s, "dp_hash", f->dp_hash,
                              wc->masks.dp_hash);
+    }
+
+    if (wc->masks.conj_id) {
+        ds_put_format(s, "conj_id=%"PRIu32",", f->conj_id);
     }
 
     if (wc->masks.skb_priority) {
@@ -1200,13 +1246,13 @@ bool
 minimatch_matches_flow(const struct minimatch *match,
                        const struct flow *target)
 {
-    const uint32_t *target_u32 = (const uint32_t *) target;
-    const uint32_t *flowp = miniflow_get_u32_values(&match->flow);
-    const uint32_t *maskp = miniflow_get_u32_values(&match->mask.masks);
+    const uint64_t *target_u64 = (const uint64_t *) target;
+    const uint64_t *flowp = miniflow_get_values(&match->flow);
+    const uint64_t *maskp = miniflow_get_values(&match->mask.masks);
     int idx;
 
     MAP_FOR_EACH_INDEX(idx, match->flow.map) {
-        if ((*flowp++ ^ target_u32[idx]) & *maskp++) {
+        if ((*flowp++ ^ target_u64[idx]) & *maskp++) {
             return false;
         }
     }

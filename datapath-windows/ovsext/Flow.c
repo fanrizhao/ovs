@@ -247,6 +247,7 @@ OvsFlowNlCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
                     UINT32 *replyLen)
 {
     NTSTATUS rc = STATUS_SUCCESS;
+    BOOLEAN ok;
     POVS_MESSAGE msgIn = (POVS_MESSAGE)usrParamsCtx->inputBuffer;
     POVS_MESSAGE msgOut = (POVS_MESSAGE)usrParamsCtx->outputBuffer;
     PNL_MSG_HDR nlMsgHdr = &(msgIn->nlMsg);
@@ -258,7 +259,6 @@ OvsFlowNlCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
     OvsFlowStats stats;
     struct ovs_flow_stats replyStats;
     NL_ERROR nlError = NL_ERROR_SUCCESS;
-
     NL_BUFFER nlBuf;
 
     RtlZeroMemory(&mappedFlow, sizeof(OvsFlowPut));
@@ -294,13 +294,14 @@ OvsFlowNlCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
                       usrParamsCtx->outputLength);
 
             /* Prepare nl Msg headers */
-            rc = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, 0,
+            ok = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, 0,
                               nlMsgHdr->nlmsgSeq, nlMsgHdr->nlmsgPid,
                               genlMsgHdr->cmd, OVS_FLOW_VERSION,
                               ovsHdr->dp_ifindex);
-
-            if (rc == STATUS_SUCCESS) {
+            if (ok) {
                 *replyLen = msgOut->nlMsg.nlmsgLen;
+            } else {
+                rc = STATUS_INVALID_BUFFER_SIZE;
             }
        }
 
@@ -330,13 +331,15 @@ OvsFlowNlCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
               usrParamsCtx->outputLength);
 
     /* Prepare nl Msg headers */
-    rc = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, 0,
+    ok = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, 0,
                       nlMsgHdr->nlmsgSeq, nlMsgHdr->nlmsgPid,
                       genlMsgHdr->cmd, OVS_FLOW_VERSION,
                       ovsHdr->dp_ifindex);
-
-    if (rc != STATUS_SUCCESS) {
+    if (!ok) {
+        rc = STATUS_INVALID_BUFFER_SIZE;
         goto done;
+    } else {
+        rc = STATUS_SUCCESS;
     }
 
     /* Append OVS_FLOW_ATTR_STATS attribute */
@@ -355,7 +358,7 @@ done:
     if (nlError != NL_ERROR_SUCCESS) {
         POVS_MESSAGE_ERROR msgError = (POVS_MESSAGE_ERROR)
                                        usrParamsCtx->outputBuffer;
-        BuildErrorMsg(msgIn, msgError, nlError);
+        NlBuildErrorMsg(msgIn, msgError, nlError);
         *replyLen = msgError->nlMsg.nlmsgLen;
         rc = STATUS_SUCCESS;
     }
@@ -387,7 +390,7 @@ OvsFlowNlGetCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
             (usrParamsCtx->outputBuffer)) {
             POVS_MESSAGE_ERROR msgError = (POVS_MESSAGE_ERROR)
                                            usrParamsCtx->outputBuffer;
-            BuildErrorMsg(msgIn, msgError, nlError);
+            NlBuildErrorMsg(msgIn, msgError, nlError);
             *replyLen = msgError->nlMsg.nlmsgLen;
             status = STATUS_SUCCESS;
             goto done;
@@ -430,6 +433,7 @@ _FlowNlGetCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
     RtlZeroMemory(&getOutput, sizeof(OvsFlowGetOutput));
     UINT32 keyAttrOffset = 0;
     UINT32 tunnelKeyAttrOffset = 0;
+    BOOLEAN ok;
 
     if (usrParamsCtx->inputLength > usrParamsCtx->outputLength) {
         /* Should not be the case.
@@ -503,8 +507,12 @@ _FlowNlGetCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
 
     /* Input already has all the attributes for the flow key.
      * Lets copy the values back. */
-    RtlCopyMemory(usrParamsCtx->outputBuffer, usrParamsCtx->inputBuffer,
-                  usrParamsCtx->inputLength);
+    ok = NlMsgPutTail(&nlBuf, (PCHAR)(usrParamsCtx->inputBuffer),
+                      usrParamsCtx->inputLength);
+    if (!ok) {
+        OVS_LOG_ERROR("Could not copy the data to the buffer tail");
+        goto done;
+    }
 
     rc = _MapFlowStatsToNlStats(&nlBuf, &((getOutput.info).stats));
     if (rc != STATUS_SUCCESS) {
@@ -586,15 +594,20 @@ _FlowNlDumpCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
 
         /* Done with Dump, send NLMSG_DONE */
         if (!(dumpOutput.n)) {
+            BOOLEAN ok;
+
             OVS_LOG_INFO("Dump Done");
 
             nlMsgOutHdr = (PNL_MSG_HDR)(NlBufAt(&nlBuf, NlBufSize(&nlBuf), 0));
-            rc = NlFillNlHdr(&nlBuf, NLMSG_DONE, NLM_F_MULTI,
+            ok = NlFillNlHdr(&nlBuf, NLMSG_DONE, NLM_F_MULTI,
                              nlMsgHdr->nlmsgSeq, nlMsgHdr->nlmsgPid);
 
-            if (rc != STATUS_SUCCESS) {
+            if (!ok) {
+                rc = STATUS_INVALID_BUFFER_SIZE;
                 OVS_LOG_ERROR("Unable to prepare DUMP_DONE reply.");
                 break;
+            } else {
+                rc = STATUS_SUCCESS;
             }
 
             NlMsgAlignSize(nlMsgOutHdr);
@@ -603,17 +616,18 @@ _FlowNlDumpCmdHandler(POVS_USER_PARAMS_CONTEXT usrParamsCtx,
             FreeUserDumpState(instance);
             break;
         } else {
+            BOOLEAN ok;
 
             hdrOffset = NlBufSize(&nlBuf);
             nlMsgOutHdr = (PNL_MSG_HDR)(NlBufAt(&nlBuf, hdrOffset, 0));
 
             /* Netlink header */
-            rc = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, NLM_F_MULTI,
+            ok = NlFillOvsMsg(&nlBuf, nlMsgHdr->nlmsgType, NLM_F_MULTI,
                               nlMsgHdr->nlmsgSeq, nlMsgHdr->nlmsgPid,
                               genlMsgHdr->cmd, genlMsgHdr->version,
                               ovsHdr->dp_ifindex);
 
-            if (rc != STATUS_SUCCESS) {
+            if (!ok) {
                 /* Reset rc to success so that we can
                  * send already added messages to user space. */
                 rc = STATUS_SUCCESS;
@@ -1873,7 +1887,6 @@ RemoveFlow(OVS_DATAPATH *datapath,
 {
     OvsFlow *f = *flow;
     *flow = NULL;
-    UNREFERENCED_PARAMETER(datapath);
 
     ASSERT(datapath->nFlows);
     datapath->nFlows--;
@@ -2052,28 +2065,6 @@ dp_unlock:
 unlock:
     NdisReleaseSpinLock(gOvsCtrlLock);
     return status;
-}
-
-NTSTATUS
-OvsDumpFlowIoctl(PVOID inputBuffer,
-                 UINT32 inputLength,
-                 PVOID outputBuffer,
-                 UINT32 outputLength,
-                 UINT32 *replyLen)
-{
-    OvsFlowDumpOutput *dumpOutput = (OvsFlowDumpOutput *)outputBuffer;
-    OvsFlowDumpInput *dumpInput = (OvsFlowDumpInput *)inputBuffer;
-
-    if (inputBuffer == NULL || outputBuffer == NULL) {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    if ((inputLength != sizeof(OvsFlowDumpInput))
-        || (outputLength != sizeof *dumpOutput + dumpInput->actionsLen)) {
-        return STATUS_INFO_LENGTH_MISMATCH;
-    }
-
-    return OvsDoDumpFlows(dumpInput, dumpOutput, replyLen);
 }
 
 static NTSTATUS

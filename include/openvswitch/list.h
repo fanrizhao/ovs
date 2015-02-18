@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Nicira, Inc.
+ * Copyright (c) 2008, 2009, 2010, 2011, 2013 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,28 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef OPENVSWITCH_LIST_H
+#define OPENVSWITCH_LIST_H 1
 
-#ifndef OVS_TNL_ROUTER_LINUX_H
-#define OVS_TNL_ROUTER_LINUX_H 1
+/* Doubly linked list head or element. */
+struct ovs_list {
+    struct ovs_list *prev;     /* Previous list element. */
+    struct ovs_list *next;     /* Next list element. */
+};
 
-#include <stddef.h>
-#include <stdint.h>
-#include <net/if.h>
+#define OVS_LIST_INITIALIZER(LIST) { LIST, LIST }
 
-#include "packets.h"
-#include "timeval.h"
-#include "unixctl.h"
-#include "util.h"
-
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
-void ovs_router_insert(ovs_be32 ip_dst, uint8_t plen, const char output_bridge[],
-                       ovs_be32 gw);
-void ovs_router_flush(void);
-#ifdef  __cplusplus
-}
-#endif
-
-#endif
+#endif /* list.h */

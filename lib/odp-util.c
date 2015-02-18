@@ -37,7 +37,7 @@
 #include "timeval.h"
 #include "unaligned.h"
 #include "util.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(odp_util);
 
@@ -1264,6 +1264,7 @@ tunnel_key_attr_len(int type)
     case OVS_TUNNEL_KEY_ATTR_TP_DST: return 2;
     case OVS_TUNNEL_KEY_ATTR_OAM: return 0;
     case OVS_TUNNEL_KEY_ATTR_GENEVE_OPTS: return -2;
+    case OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS: return -2;
     case __OVS_TUNNEL_KEY_ATTR_MAX:
         return -1;
     }
@@ -1353,6 +1354,25 @@ odp_tun_key_from_attr(const struct nlattr *attr, struct flow_tnl *tun)
         case OVS_TUNNEL_KEY_ATTR_OAM:
             tun->flags |= FLOW_TNL_F_OAM;
             break;
+        case OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS: {
+            static const struct nl_policy vxlan_opts_policy[] = {
+                [OVS_VXLAN_EXT_GBP] = { .type = NL_A_U32 },
+            };
+            struct nlattr *ext[ARRAY_SIZE(vxlan_opts_policy)];
+
+            if (!nl_parse_nested(a, vxlan_opts_policy, ext, ARRAY_SIZE(ext))) {
+                return ODP_FIT_ERROR;
+            }
+
+            if (ext[OVS_VXLAN_EXT_GBP]) {
+                uint32_t gbp = nl_attr_get_u32(ext[OVS_VXLAN_EXT_GBP]);
+
+                tun->gbp_id = htons(gbp & 0xFFFF);
+                tun->gbp_flags = (gbp >> 16) & 0xFF;
+            }
+
+            break;
+        }
         case OVS_TUNNEL_KEY_ATTR_GENEVE_OPTS: {
             if (parse_geneve_opts(a)) {
                 return ODP_FIT_ERROR;
@@ -1415,6 +1435,14 @@ tun_key_to_attr(struct ofpbuf *a, const struct flow_tnl *tun_key)
     if (tun_key->flags & FLOW_TNL_F_OAM) {
         nl_msg_put_flag(a, OVS_TUNNEL_KEY_ATTR_OAM);
     }
+    if (tun_key->gbp_flags || tun_key->gbp_id) {
+        size_t vxlan_opts_ofs;
+
+        vxlan_opts_ofs = nl_msg_start_nested(a, OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS);
+        nl_msg_put_u32(a, OVS_VXLAN_EXT_GBP,
+                       (tun_key->gbp_flags << 16) | ntohs(tun_key->gbp_id));
+        nl_msg_end_nested(a, vxlan_opts_ofs);
+    }
 
     nl_msg_end_nested(a, tun_key_ofs);
 }
@@ -1454,7 +1482,9 @@ odp_mask_is_exact(enum ovs_key_attr attr, const void *mask, size_t size)
             && tun_mask->ip_tos == UINT8_MAX
             && tun_mask->ip_ttl == UINT8_MAX
             && tun_mask->tp_src == OVS_BE16_MAX
-            && tun_mask->tp_dst == OVS_BE16_MAX;
+            && tun_mask->tp_dst == OVS_BE16_MAX
+            && tun_mask->gbp_id == OVS_BE16_MAX
+            && tun_mask->gbp_flags == UINT8_MAX;
     }
 
     if (attr == OVS_KEY_ATTR_ARP) {
@@ -1799,6 +1829,8 @@ format_odp_key_attr(const struct nlattr *a, const struct nlattr *ma,
         format_u8u(ds, "ttl", key.ip_ttl, MASK(mask, ip_ttl), verbose);
         format_be16(ds, "tp_src", key.tp_src, MASK(mask, tp_src), verbose);
         format_be16(ds, "tp_dst", key.tp_dst, MASK(mask, tp_dst), verbose);
+        format_be16(ds, "gbp_id", key.gbp_id, MASK(mask, gbp_id), verbose);
+        format_u8x(ds, "gbp_flags", key.gbp_flags, MASK(mask, gbp_flags), verbose);
         format_tun_flags(ds, "flags", key.flags, MASK(mask, flags), verbose);
         ds_chomp(ds, ',');
         break;
@@ -1999,11 +2031,42 @@ generate_all_wildcard_mask(struct ofpbuf *ofp, const struct nlattr *key)
     return ofpbuf_base(ofp);
 }
 
+int
+odp_ufid_from_string(const char *s_, ovs_u128 *ufid)
+{
+    const char *s = s_;
+
+    if (ovs_scan(s, "ufid:")) {
+        size_t n;
+
+        s += 5;
+        if (ovs_scan(s, "0x")) {
+            s += 2;
+        }
+
+        n = strspn(s, "0123456789abcdefABCDEF");
+        if (n != 32) {
+            return -EINVAL;
+        }
+
+        if (!ovs_scan(s, "%16"SCNx64"%16"SCNx64, &ufid->u64.hi,
+                      &ufid->u64.lo)) {
+            return -EINVAL;
+        }
+        s += n;
+        s += strspn(s, delimiters);
+
+        return s - s_;
+    }
+
+    return 0;
+}
+
 void
 odp_format_ufid(const ovs_u128 *ufid, struct ds *ds)
 {
-    ds_put_format(ds, "ufid:%016"PRIx64"%016"PRIx64, ufid->u64.lo,
-                  ufid->u64.hi);
+    ds_put_format(ds, "ufid:%016"PRIx64"%016"PRIx64, ufid->u64.hi,
+                  ufid->u64.lo);
 }
 
 /* Appends to 'ds' a string representation of the 'key_len' bytes of
@@ -2621,6 +2684,8 @@ parse_odp_key_mask_attr(const char *s, const struct simap *port_names,
         SCAN_FIELD("ttl=", u8, ip_ttl);
         SCAN_FIELD("tp_src=", be16, tp_src);
         SCAN_FIELD("tp_dst=", be16, tp_dst);
+        SCAN_FIELD("gbp_id=", be16, gbp_id);
+        SCAN_FIELD("gbp_flags=", u8, gbp_flags);
         SCAN_FIELD("flags(", tun_flags, flags);
     } SCAN_END(OVS_KEY_ATTR_TUNNEL);
 
@@ -2721,7 +2786,7 @@ parse_odp_key_mask_attr(const char *s, const struct simap *port_names,
         for (;;) {
             int retval;
 
-            s += strspn(s, ", \t\r\n");
+            s += strspn(s, delimiters);
             if (!*s) {
                 return -EINVAL;
             } else if (*s == ')') {
@@ -2813,6 +2878,8 @@ static void put_ipv6_key(const struct ovs_key_ipv6 *, struct flow *,
                          bool is_mask);
 static void get_arp_key(const struct flow *, struct ovs_key_arp *);
 static void put_arp_key(const struct ovs_key_arp *, struct flow *);
+static void get_nd_key(const struct flow *, struct ovs_key_nd *);
+static void put_nd_key(const struct ovs_key_nd *, struct flow *);
 
 /* These share the same layout. */
 union ovs_key_tp {
@@ -4156,6 +4223,45 @@ commit_set_arp_action(const struct flow *flow, struct flow *base_flow,
     return 0;
 }
 
+static void
+get_nd_key(const struct flow *flow, struct ovs_key_nd *nd)
+{
+    memcpy(nd->nd_target, &flow->nd_target, sizeof flow->nd_target);
+    /* nd_sll and nd_tll are stored in arp_sha and arp_tha, respectively */
+    memcpy(nd->nd_sll, flow->arp_sha, ETH_ADDR_LEN);
+    memcpy(nd->nd_tll, flow->arp_tha, ETH_ADDR_LEN);
+}
+
+static void
+put_nd_key(const struct ovs_key_nd *nd, struct flow *flow)
+{
+    memcpy(&flow->nd_target, &flow->nd_target, sizeof flow->nd_target);
+    /* nd_sll and nd_tll are stored in arp_sha and arp_tha, respectively */
+    memcpy(flow->arp_sha, nd->nd_sll, ETH_ADDR_LEN);
+    memcpy(flow->arp_tha, nd->nd_tll, ETH_ADDR_LEN);
+}
+
+static enum slow_path_reason
+commit_set_nd_action(const struct flow *flow, struct flow *base_flow,
+                     struct ofpbuf *odp_actions,
+                     struct flow_wildcards *wc, bool use_masked)
+{
+    struct ovs_key_nd key, mask, base;
+
+    get_nd_key(flow, &key);
+    get_nd_key(base_flow, &base);
+    get_nd_key(&wc->masks, &mask);
+
+    if (commit(OVS_KEY_ATTR_ND, use_masked, &key, &base, &mask, sizeof key,
+               odp_actions)) {
+        put_nd_key(&base, base_flow);
+        put_nd_key(&mask, &wc->masks);
+        return SLOW_ACTION;
+    }
+
+    return 0;
+}
+
 static enum slow_path_reason
 commit_set_nw_action(const struct flow *flow, struct flow *base,
                      struct ofpbuf *odp_actions, struct flow_wildcards *wc,
@@ -4173,7 +4279,7 @@ commit_set_nw_action(const struct flow *flow, struct flow *base,
 
     case ETH_TYPE_IPV6:
         commit_set_ipv6_action(flow, base, odp_actions, wc, use_masked);
-        break;
+        return commit_set_nd_action(flow, base, odp_actions, wc, use_masked);
 
     case ETH_TYPE_ARP:
         return commit_set_arp_action(flow, base, odp_actions, wc);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@
 #include "random.h"
 #include "unaligned.h"
 #include "type-props.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 #include "bitmap.h"
 
 VLOG_DEFINE_THIS_MODULE(ofp_util);
@@ -108,7 +108,7 @@ ofputil_pull_property(struct ofpbuf *msg, struct ofpbuf *property,
     return ofputil_pull_property__(msg, property, 8, typep);
 }
 
-static void PRINTF_FORMAT(2, 3)
+static void OVS_PRINTF_FORMAT(2, 3)
 log_property(bool loose, const char *message, ...)
 {
     enum vlog_level level = loose ? VLL_DBG : VLL_WARN;
@@ -186,7 +186,7 @@ ofputil_netmask_to_wcbits(ovs_be32 netmask)
 void
 ofputil_wildcard_from_ofpfw10(uint32_t ofpfw, struct flow_wildcards *wc)
 {
-    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 28);
+    BUILD_ASSERT_DECL(FLOW_WC_SEQ == 31);
 
     /* Initialize most of wc. */
     flow_wildcards_init_catchall(wc);
@@ -1969,7 +1969,7 @@ ofputil_put_bands(uint16_t n_bands, const struct ofputil_meter_band *mb,
 
 /* Encode a meter stat for 'mc' and append it to 'replies'. */
 void
-ofputil_append_meter_config(struct list *replies,
+ofputil_append_meter_config(struct ovs_list *replies,
                             const struct ofputil_meter_config *mc)
 {
     struct ofpbuf *msg = ofpbuf_from_list(list_back(replies));
@@ -1987,7 +1987,7 @@ ofputil_append_meter_config(struct list *replies,
 
 /* Encode a meter stat for 'ms' and append it to 'replies'. */
 void
-ofputil_append_meter_stats(struct list *replies,
+ofputil_append_meter_stats(struct ovs_list *replies,
                            const struct ofputil_meter_stats *ms)
 {
     struct ofp13_meter_stats *reply;
@@ -2973,7 +2973,7 @@ unknown_to_zero(uint64_t count)
  * have been initialized with ofpmp_init(). */
 void
 ofputil_append_flow_stats_reply(const struct ofputil_flow_stats *fs,
-                                struct list *replies)
+                                struct ovs_list *replies)
 {
     struct ofpbuf *reply = ofpbuf_from_list(list_back(replies));
     size_t start_ofs = ofpbuf_size(reply);
@@ -3298,6 +3298,8 @@ ofputil_decode_packet_in_finish(struct ofputil_packet_in *pin,
     pin->fmd.tun_id = match->flow.tunnel.tun_id;
     pin->fmd.tun_src = match->flow.tunnel.ip_src;
     pin->fmd.tun_dst = match->flow.tunnel.ip_dst;
+    pin->fmd.gbp_id = match->flow.tunnel.gbp_id;
+    pin->fmd.gbp_flags = match->flow.tunnel.gbp_flags;
     pin->fmd.metadata = match->flow.metadata;
     memcpy(pin->fmd.regs, match->flow.regs, sizeof pin->fmd.regs);
     pin->fmd.pkt_mark = match->flow.pkt_mark;
@@ -3422,6 +3424,12 @@ ofputil_packet_in_to_match(const struct ofputil_packet_in *pin,
     }
     if (pin->fmd.tun_dst != htonl(0)) {
         match_set_tun_dst(match, pin->fmd.tun_dst);
+    }
+    if (pin->fmd.gbp_id != htons(0)) {
+        match_set_tun_gbp_id(match, pin->fmd.gbp_id);
+    }
+    if (pin->fmd.gbp_flags) {
+        match_set_tun_gbp_flags(match, pin->fmd.gbp_flags);
     }
     if (pin->fmd.metadata != htonll(0)) {
         match_set_metadata(match, pin->fmd.metadata);
@@ -4054,7 +4062,7 @@ ofputil_encode_port_desc_stats_request(enum ofp_version ofp_version,
 
 void
 ofputil_append_port_desc_stats_reply(const struct ofputil_phy_port *pp,
-                                     struct list *replies)
+                                     struct ovs_list *replies)
 {
     struct ofpbuf *reply = ofpbuf_from_list(list_back(replies));
     size_t start_ofs = ofpbuf_size(reply);
@@ -4875,7 +4883,7 @@ put_table_instruction_features(
 
 void
 ofputil_append_table_features_reply(const struct ofputil_table_features *tf,
-                                    struct list *replies)
+                                    struct ovs_list *replies)
 {
     struct ofpbuf *reply = ofpbuf_from_list(list_back(replies));
     enum ofp_version version = ofpmp_version(replies);
@@ -5809,7 +5817,7 @@ ofputil_encode_flow_monitor_cancel(uint32_t id)
 }
 
 void
-ofputil_start_flow_update(struct list *replies)
+ofputil_start_flow_update(struct ovs_list *replies)
 {
     struct ofpbuf *msg;
 
@@ -5822,7 +5830,7 @@ ofputil_start_flow_update(struct list *replies)
 
 void
 ofputil_append_flow_update(const struct ofputil_flow_update *update,
-                           struct list *replies)
+                           struct ovs_list *replies)
 {
     enum ofp_version version = ofpmp_version(replies);
     struct nx_flow_update_header *nfuh;
@@ -6540,7 +6548,7 @@ ofputil_port_stats_to_ofp13(const struct ofputil_port_stats *ops,
 
 static void
 ofputil_append_ofp14_port_stats(const struct ofputil_port_stats *ops,
-                                struct list *replies)
+                                struct ovs_list *replies)
 {
     struct ofp14_port_stats_prop_ethernet *eth;
     struct ofp14_port_stats *ps14;
@@ -6575,7 +6583,7 @@ ofputil_append_ofp14_port_stats(const struct ofputil_port_stats *ops,
 
 /* Encode a ports stat for 'ops' and append it to 'replies'. */
 void
-ofputil_append_port_stat(struct list *replies,
+ofputil_append_port_stat(struct ovs_list *replies,
                          const struct ofputil_port_stats *ops)
 {
     switch (ofpmp_version(replies)) {
@@ -6869,7 +6877,7 @@ ofputil_decode_port_stats_request(const struct ofp_header *request,
 
 /* Frees all of the "struct ofputil_bucket"s in the 'buckets' list. */
 void
-ofputil_bucket_list_destroy(struct list *buckets)
+ofputil_bucket_list_destroy(struct ovs_list *buckets)
 {
     struct ofputil_bucket *bucket, *next_bucket;
 
@@ -6899,7 +6907,7 @@ ofputil_bucket_clone_data(const struct ofputil_bucket *bucket)
  * This allows all of 'src' or 'all of 'src' except 'skip' to
  * be cloned and appended to 'dest'. */
 void
-ofputil_bucket_clone_list(struct list *dest, const struct list *src,
+ofputil_bucket_clone_list(struct ovs_list *dest, const struct ovs_list *src,
                           const struct ofputil_bucket *skip)
 {
     struct ofputil_bucket *bucket;
@@ -6919,7 +6927,7 @@ ofputil_bucket_clone_list(struct list *dest, const struct list *src,
 /* Find a bucket in the list 'buckets' whose bucket id is 'bucket_id'
  * Returns the first bucket found or NULL if no buckets are found. */
 struct ofputil_bucket *
-ofputil_bucket_find(const struct list *buckets, uint32_t bucket_id)
+ofputil_bucket_find(const struct ovs_list *buckets, uint32_t bucket_id)
 {
     struct ofputil_bucket *bucket;
 
@@ -6939,7 +6947,7 @@ ofputil_bucket_find(const struct list *buckets, uint32_t bucket_id)
 /* Returns true if more than one bucket in the list 'buckets'
  * have the same bucket id. Returns false otherwise. */
 bool
-ofputil_bucket_check_duplicate_id(const struct list *buckets)
+ofputil_bucket_check_duplicate_id(const struct ovs_list *buckets)
 {
     struct ofputil_bucket *i, *j;
 
@@ -6960,7 +6968,7 @@ ofputil_bucket_check_duplicate_id(const struct list *buckets)
 /* Returns the bucket at the front of the list 'buckets'.
  * Undefined if 'buckets is empty. */
 struct ofputil_bucket *
-ofputil_bucket_list_front(const struct list *buckets)
+ofputil_bucket_list_front(const struct ovs_list *buckets)
 {
     static struct ofputil_bucket *bucket;
 
@@ -6972,7 +6980,7 @@ ofputil_bucket_list_front(const struct list *buckets)
 /* Returns the bucket at the back of the list 'buckets'.
  * Undefined if 'buckets is empty. */
 struct ofputil_bucket *
-ofputil_bucket_list_back(const struct list *buckets)
+ofputil_bucket_list_back(const struct ovs_list *buckets)
 {
     static struct ofputil_bucket *bucket;
 
@@ -7114,7 +7122,7 @@ ofputil_group_stats_to_ofp13(const struct ofputil_group_stats *gs,
  * replies already begun in 'replies' and appends it to the list.  'replies'
  * must have originally been initialized with ofpmp_init(). */
 void
-ofputil_append_group_stats(struct list *replies,
+ofputil_append_group_stats(struct ovs_list *replies,
                            const struct ofputil_group_stats *gs)
 {
     size_t bucket_counter_size;
@@ -7408,8 +7416,8 @@ ofputil_put_ofp15_bucket(const struct ofputil_bucket *bucket,
 
 static void
 ofputil_append_ofp11_group_desc_reply(const struct ofputil_group_desc *gds,
-                                      struct list *buckets,
-                                      struct list *replies,
+                                      const struct ovs_list *buckets,
+                                      struct ovs_list *replies,
                                       enum ofp_version version)
 {
     struct ofpbuf *reply = ofpbuf_from_list(list_back(replies));
@@ -7432,8 +7440,8 @@ ofputil_append_ofp11_group_desc_reply(const struct ofputil_group_desc *gds,
 
 static void
 ofputil_append_ofp15_group_desc_reply(const struct ofputil_group_desc *gds,
-                                      struct list *buckets,
-                                      struct list *replies,
+                                      const struct ovs_list *buckets,
+                                      struct ovs_list *replies,
                                       enum ofp_version version)
 {
     struct ofpbuf *reply = ofpbuf_from_list(list_back(replies));
@@ -7462,8 +7470,8 @@ ofputil_append_ofp15_group_desc_reply(const struct ofputil_group_desc *gds,
  * initialized with ofpmp_init(). */
 void
 ofputil_append_group_desc_reply(const struct ofputil_group_desc *gds,
-                                struct list *buckets,
-                                struct list *replies)
+                                const struct ovs_list *buckets,
+                                struct ovs_list *replies)
 {
     enum ofp_version version = ofpmp_version(replies);
 
@@ -7488,7 +7496,7 @@ ofputil_append_group_desc_reply(const struct ofputil_group_desc *gds,
 
 static enum ofperr
 ofputil_pull_ofp11_buckets(struct ofpbuf *msg, size_t buckets_length,
-                           enum ofp_version version, struct list *buckets)
+                           enum ofp_version version, struct ovs_list *buckets)
 {
     struct ofp11_bucket *ob;
     uint32_t bucket_id = 0;
@@ -7586,7 +7594,7 @@ parse_ofp15_group_bucket_prop_watch(const struct ofpbuf *payload,
 
 static enum ofperr
 ofputil_pull_ofp15_buckets(struct ofpbuf *msg, size_t buckets_length,
-                           enum ofp_version version, struct list *buckets)
+                           enum ofp_version version, struct ovs_list *buckets)
 {
     struct ofp15_bucket *ob;
 
@@ -7992,6 +8000,7 @@ ofputil_pull_ofp11_group_mod(struct ofpbuf *msg, enum ofp_version ofp_version,
                              struct ofputil_group_mod *gm)
 {
     const struct ofp11_group_mod *ogm;
+    enum ofperr error;
 
     ogm = ofpbuf_pull(msg, sizeof *ogm);
     gm->command = ntohs(ogm->command);
@@ -7999,8 +8008,18 @@ ofputil_pull_ofp11_group_mod(struct ofpbuf *msg, enum ofp_version ofp_version,
     gm->group_id = ntohl(ogm->group_id);
     gm->command_bucket_id = OFPG15_BUCKET_ALL;
 
-    return ofputil_pull_ofp11_buckets(msg, ofpbuf_size(msg), ofp_version,
-                                      &gm->buckets);
+    error = ofputil_pull_ofp11_buckets(msg, ofpbuf_size(msg), ofp_version,
+                                       &gm->buckets);
+
+    /* OF1.3.5+ prescribes an error when an OFPGC_DELETE includes buckets. */
+    if (!error
+        && ofp_version >= OFP13_VERSION
+        && gm->command == OFPGC11_DELETE
+        && !list_is_empty(&gm->buckets)) {
+        error = OFPERR_OFPGMFC_INVALID_GROUP;
+    }
+
+    return error;
 }
 
 static enum ofperr
@@ -8415,7 +8434,7 @@ ofputil_queue_stats_to_ofp14(const struct ofputil_queue_stats *oqs,
 
 /* Encode a queue stat for 'oqs' and append it to 'replies'. */
 void
-ofputil_append_queue_stat(struct list *replies,
+ofputil_append_queue_stat(struct ovs_list *replies,
                           const struct ofputil_queue_stats *oqs)
 {
     switch (ofpmp_version(replies)) {
@@ -8487,6 +8506,92 @@ ofputil_encode_bundle_ctrl_reply(const struct ofp_header *oh,
     return buf;
 }
 
+/* Return true for bundlable state change requests, false for other messages.
+ */
+static bool
+ofputil_is_bundlable(enum ofptype type)
+{
+    switch (type) {
+        /* Minimum required by OpenFlow 1.4. */
+    case OFPTYPE_PORT_MOD:
+    case OFPTYPE_FLOW_MOD:
+        return true;
+
+        /* Nice to have later. */
+    case OFPTYPE_FLOW_MOD_TABLE_ID:
+    case OFPTYPE_GROUP_MOD:
+    case OFPTYPE_TABLE_MOD:
+    case OFPTYPE_METER_MOD:
+    case OFPTYPE_PACKET_OUT:
+
+        /* Not to be bundlable. */
+    case OFPTYPE_ECHO_REQUEST:
+    case OFPTYPE_FEATURES_REQUEST:
+    case OFPTYPE_GET_CONFIG_REQUEST:
+    case OFPTYPE_SET_CONFIG:
+    case OFPTYPE_BARRIER_REQUEST:
+    case OFPTYPE_ROLE_REQUEST:
+    case OFPTYPE_ECHO_REPLY:
+    case OFPTYPE_SET_FLOW_FORMAT:
+    case OFPTYPE_SET_PACKET_IN_FORMAT:
+    case OFPTYPE_SET_CONTROLLER_ID:
+    case OFPTYPE_FLOW_AGE:
+    case OFPTYPE_FLOW_MONITOR_CANCEL:
+    case OFPTYPE_SET_ASYNC_CONFIG:
+    case OFPTYPE_GET_ASYNC_REQUEST:
+    case OFPTYPE_DESC_STATS_REQUEST:
+    case OFPTYPE_FLOW_STATS_REQUEST:
+    case OFPTYPE_AGGREGATE_STATS_REQUEST:
+    case OFPTYPE_TABLE_STATS_REQUEST:
+    case OFPTYPE_TABLE_FEATURES_STATS_REQUEST:
+    case OFPTYPE_PORT_STATS_REQUEST:
+    case OFPTYPE_QUEUE_STATS_REQUEST:
+    case OFPTYPE_PORT_DESC_STATS_REQUEST:
+    case OFPTYPE_FLOW_MONITOR_STATS_REQUEST:
+    case OFPTYPE_METER_STATS_REQUEST:
+    case OFPTYPE_METER_CONFIG_STATS_REQUEST:
+    case OFPTYPE_METER_FEATURES_STATS_REQUEST:
+    case OFPTYPE_GROUP_STATS_REQUEST:
+    case OFPTYPE_GROUP_DESC_STATS_REQUEST:
+    case OFPTYPE_GROUP_FEATURES_STATS_REQUEST:
+    case OFPTYPE_QUEUE_GET_CONFIG_REQUEST:
+    case OFPTYPE_BUNDLE_CONTROL:
+    case OFPTYPE_BUNDLE_ADD_MESSAGE:
+    case OFPTYPE_HELLO:
+    case OFPTYPE_ERROR:
+    case OFPTYPE_FEATURES_REPLY:
+    case OFPTYPE_GET_CONFIG_REPLY:
+    case OFPTYPE_PACKET_IN:
+    case OFPTYPE_FLOW_REMOVED:
+    case OFPTYPE_PORT_STATUS:
+    case OFPTYPE_BARRIER_REPLY:
+    case OFPTYPE_QUEUE_GET_CONFIG_REPLY:
+    case OFPTYPE_DESC_STATS_REPLY:
+    case OFPTYPE_FLOW_STATS_REPLY:
+    case OFPTYPE_QUEUE_STATS_REPLY:
+    case OFPTYPE_PORT_STATS_REPLY:
+    case OFPTYPE_TABLE_STATS_REPLY:
+    case OFPTYPE_AGGREGATE_STATS_REPLY:
+    case OFPTYPE_PORT_DESC_STATS_REPLY:
+    case OFPTYPE_ROLE_REPLY:
+    case OFPTYPE_FLOW_MONITOR_PAUSED:
+    case OFPTYPE_FLOW_MONITOR_RESUMED:
+    case OFPTYPE_FLOW_MONITOR_STATS_REPLY:
+    case OFPTYPE_GET_ASYNC_REPLY:
+    case OFPTYPE_GROUP_STATS_REPLY:
+    case OFPTYPE_GROUP_DESC_STATS_REPLY:
+    case OFPTYPE_GROUP_FEATURES_STATS_REPLY:
+    case OFPTYPE_METER_STATS_REPLY:
+    case OFPTYPE_METER_CONFIG_STATS_REPLY:
+    case OFPTYPE_METER_FEATURES_STATS_REPLY:
+    case OFPTYPE_TABLE_FEATURES_STATS_REPLY:
+    case OFPTYPE_ROLE_STATUS:
+        break;
+    }
+
+    return false;
+}
+
 enum ofperr
 ofputil_decode_bundle_add(const struct ofp_header *oh,
                           struct ofputil_bundle_add_msg *msg)
@@ -8495,6 +8600,8 @@ ofputil_decode_bundle_add(const struct ofp_header *oh,
     struct ofpbuf b;
     enum ofpraw raw;
     size_t inner_len;
+    enum ofperr error;
+    enum ofptype type;
 
     ofpbuf_use_const(&b, oh, ntohs(oh->length));
     raw = ofpraw_pull_assert(&b);
@@ -8508,6 +8615,21 @@ ofputil_decode_bundle_add(const struct ofp_header *oh,
     inner_len = ntohs(msg->msg->length);
     if (inner_len < sizeof(struct ofp_header) || inner_len > ofpbuf_size(&b)) {
         return OFPERR_OFPBFC_MSG_BAD_LEN;
+    }
+    if (msg->msg->xid != oh->xid) {
+        return OFPERR_OFPBFC_MSG_BAD_XID;
+    }
+
+    /* Reject unbundlable messages. */
+    error = ofptype_decode(&type, msg->msg);
+    if (error) {
+        VLOG_WARN_RL(&bad_ofmsg_rl, "OFPT14_BUNDLE_ADD_MESSAGE contained "
+                     "message is unparsable (%s)", ofperr_get_name(error));
+        return OFPERR_OFPBFC_MSG_UNSUP; /* 'error' would be confusing. */
+    }
+
+    if (!ofputil_is_bundlable(type)) {
+        return OFPERR_OFPBFC_MSG_UNSUP;
     }
 
     return 0;

@@ -17,7 +17,6 @@
  */
 
 #include <linux/version.h>
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
 
 #include <linux/module.h>
 #include <linux/if.h>
@@ -53,6 +52,7 @@ MODULE_PARM_DESC(vlan_tso, "Enable TSO for VLAN packets");
 #define vlan_tso true
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
 static bool dev_supports_vlan_tx(struct net_device *dev)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
@@ -97,7 +97,7 @@ int rpl_dev_queue_xmit(struct sk_buff *skb)
 	if (skb->mac_len != skb_network_offset(skb) && !supports_mpls_gso())
 		mpls = true;
 
-	if (vlan_tx_tag_present(skb) && !dev_supports_vlan_tx(skb->dev))
+	if (skb_vlan_tag_present(skb) && !dev_supports_vlan_tx(skb->dev))
 		vlan = true;
 
 	if (vlan || mpls) {
@@ -110,8 +110,8 @@ int rpl_dev_queue_xmit(struct sk_buff *skb)
 				features &= ~(NETIF_F_TSO | NETIF_F_TSO6 |
 					      NETIF_F_UFO | NETIF_F_FSO);
 
-			skb = __vlan_put_tag(skb, skb->vlan_proto,
-					     vlan_tx_tag_get(skb));
+			skb = vlan_insert_tag_set_proto(skb, skb->vlan_proto,
+							skb_vlan_tag_get(skb));
 			if (unlikely(!skb))
 				return err;
 			vlan_set_tci(skb, 0);
@@ -294,3 +294,55 @@ int rpl_ip_local_out(struct sk_buff *skb)
 	return ret;
 }
 #endif /* 3.16 */
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0) || \
+	!defined USE_UPSTREAM_VXLAN
+struct sk_buff *ovs_iptunnel_handle_offloads(struct sk_buff *skb,
+                                             bool csum_help,
+					     void (*fix_segment)(struct sk_buff *))
+{
+	int err;
+
+	/* XXX: synchronize inner header reset for compat and non compat code
+	 * so that we can do it here.
+	 */
+	/*
+	 skb_reset_inner_headers(skb);
+	 */
+
+	/* OVS compat code does not maintain encapsulation bit.
+	 * skb->encapsulation = 1; */
+
+	if (skb_is_gso(skb)) {
+		if (skb_is_encapsulated(skb)) {
+			err = -ENOSYS;
+			goto error;
+		}
+
+		OVS_GSO_CB(skb)->fix_segment = fix_segment;
+		return skb;
+	}
+
+	/* If packet is not gso and we are resolving any partial checksum,
+	 * clear encapsulation flag. This allows setting CHECKSUM_PARTIAL
+	 * on the outer header without confusing devices that implement
+	 * NETIF_F_IP_CSUM with encapsulation.
+	 */
+	/*
+	if (csum_help)
+		skb->encapsulation = 0;
+	*/
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL && csum_help) {
+		err = skb_checksum_help(skb);
+		if (unlikely(err))
+			goto error;
+	} else if (skb->ip_summed != CHECKSUM_PARTIAL)
+		skb->ip_summed = CHECKSUM_NONE;
+
+	return skb;
+error:
+	kfree_skb(skb);
+	return ERR_PTR(err);
+}
+#endif /* 3.12 || !USE_UPSTREAM_VXLAN */

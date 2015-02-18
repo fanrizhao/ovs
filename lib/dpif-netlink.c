@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@
 #include "timeval.h"
 #include "unaligned.h"
 #include "util.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(dpif_netlink);
 #ifdef _WIN32
@@ -138,8 +138,6 @@ static void dpif_netlink_flow_get_stats(const struct dpif_netlink_flow *,
                                         struct dpif_flow_stats *);
 static void dpif_netlink_flow_to_dpif_flow(struct dpif *, struct dpif_flow *,
                                            const struct dpif_netlink_flow *);
-static bool dpif_netlink_check_ufid__(struct dpif *dpif);
-static bool dpif_netlink_check_ufid(struct dpif *dpif);
 
 /* One of the dpif channels between the kernel and userspace. */
 struct dpif_channel {
@@ -190,11 +188,6 @@ struct dpif_netlink {
     /* Change notification. */
     struct nl_sock *port_notifier; /* vport multicast group subscriber. */
     bool refresh_channels;
-
-    /* If the datapath supports indexing flows using unique identifiers, then
-     * we can reduce the size of netlink messages by omitting fields like the
-     * flow key during flow operations. */
-    bool ufid_supported;
 };
 
 static void report_loss(struct dpif_netlink *, struct dpif_channel *,
@@ -311,7 +304,6 @@ open_dpif(const struct dpif_netlink_dp *dp, struct dpif **dpifp)
               dp->dp_ifindex, dp->dp_ifindex);
 
     dpif->dp_ifindex = dp->dp_ifindex;
-    dpif->ufid_supported = dpif_netlink_check_ufid__(&dpif->dpif);
     *dpifp = &dpif->dpif;
 
     return 0;
@@ -653,6 +645,7 @@ destroy_all_channels(struct dpif_netlink *dpif)
         vport_request.cmd = OVS_VPORT_CMD_SET;
         vport_request.dp_ifindex = dpif->dp_ifindex;
         vport_request.port_no = u32_to_odp(i);
+        vport_request.n_upcall_pids = 1;
         vport_request.upcall_pids = &upcall_pids;
         dpif_netlink_vport_transact(&vport_request, NULL, NULL);
 
@@ -856,10 +849,24 @@ dpif_netlink_port_add__(struct dpif_netlink *dpif, struct netdev *netdev,
     }
 
     tnl_cfg = netdev_get_tunnel_config(netdev);
-    if (tnl_cfg && tnl_cfg->dst_port != 0) {
+    if (tnl_cfg && (tnl_cfg->dst_port != 0 || tnl_cfg->exts)) {
         ofpbuf_use_stack(&options, options_stub, sizeof options_stub);
-        nl_msg_put_u16(&options, OVS_TUNNEL_ATTR_DST_PORT,
-                       ntohs(tnl_cfg->dst_port));
+        if (tnl_cfg->dst_port) {
+            nl_msg_put_u16(&options, OVS_TUNNEL_ATTR_DST_PORT,
+                           ntohs(tnl_cfg->dst_port));
+        }
+        if (tnl_cfg->exts) {
+            size_t ext_ofs;
+            int i;
+
+            ext_ofs = nl_msg_start_nested(&options, OVS_TUNNEL_ATTR_EXTENSION);
+            for (i = 0; i < 32; i++) {
+                if (tnl_cfg->exts & (1 << i)) {
+                    nl_msg_put_flag(&options, i);
+                }
+            }
+            nl_msg_end_nested(&options, ext_ofs);
+        }
         request.options = ofpbuf_data(&options);
         request.options_len = ofpbuf_size(&options);
     }
@@ -1329,21 +1336,7 @@ dpif_netlink_init_flow_del(struct dpif_netlink *dpif,
                            struct dpif_netlink_flow *request)
 {
     return dpif_netlink_init_flow_del__(dpif, del->key, del->key_len,
-                                        del->ufid, dpif->ufid_supported,
-                                        request);
-}
-
-static int
-dpif_netlink_flow_del(struct dpif_netlink *dpif,
-                      const struct nlattr *key, size_t key_len,
-                      const ovs_u128 *ufid, bool terse)
-{
-    struct dpif_netlink_flow request;
-
-    dpif_netlink_init_flow_del__(dpif, key, key_len, ufid, terse, &request);
-
-    /* Ignore stats */
-    return dpif_netlink_flow_transact(&request, NULL, NULL);
+                                        del->ufid, del->terse, request);
 }
 
 struct dpif_netlink_flow_dump {
@@ -1450,6 +1443,7 @@ dpif_netlink_flow_to_dpif_flow(struct dpif *dpif, struct dpif_flow *dpif_flow,
     dpif_flow->actions = datapath_flow->actions;
     dpif_flow->actions_len = datapath_flow->actions_len;
     dpif_flow->ufid_present = datapath_flow->ufid_present;
+    dpif_flow->pmd_id = PMD_ID_NULL;
     if (datapath_flow->ufid_present) {
         dpif_flow->ufid = datapath_flow->ufid;
     } else {
@@ -1551,16 +1545,19 @@ dpif_netlink_encode_execute(int dp_ifindex, const struct dpif_execute *d_exec,
     nl_msg_put_unspec(buf, OVS_PACKET_ATTR_ACTIONS,
                       d_exec->actions, d_exec->actions_len);
     if (d_exec->probe) {
-        nl_msg_put_flag(buf, OVS_FLOW_ATTR_PROBE);
+        nl_msg_put_flag(buf, OVS_PACKET_ATTR_PROBE);
     }
 }
 
-#define MAX_OPS 50
-
-static void
+/* Executes, against 'dpif', up to the first 'n_ops' operations in 'ops'.
+ * Returns the number actually executed (at least 1, if 'n_ops' is
+ * positive). */
+static size_t
 dpif_netlink_operate__(struct dpif_netlink *dpif,
                        struct dpif_op **ops, size_t n_ops)
 {
+    enum { MAX_OPS = 50 };
+
     struct op_auxdata {
         struct nl_transaction txn;
 
@@ -1574,13 +1571,12 @@ dpif_netlink_operate__(struct dpif_netlink *dpif,
     struct nl_transaction *txnsp[MAX_OPS];
     size_t i;
 
-    ovs_assert(n_ops <= MAX_OPS);
+    n_ops = MIN(n_ops, MAX_OPS);
     for (i = 0; i < n_ops; i++) {
         struct op_auxdata *aux = &auxes[i];
         struct dpif_op *op = ops[i];
         struct dpif_flow_put *put;
         struct dpif_flow_del *del;
-        struct dpif_execute *execute;
         struct dpif_flow_get *get;
         struct dpif_netlink_flow flow;
 
@@ -1613,9 +1609,24 @@ dpif_netlink_operate__(struct dpif_netlink *dpif,
             break;
 
         case DPIF_OP_EXECUTE:
-            execute = &op->u.execute;
-            dpif_netlink_encode_execute(dpif->dp_ifindex, execute,
-                                        &aux->request);
+            /* Can't execute a packet that won't fit in a Netlink attribute. */
+            if (OVS_UNLIKELY(nl_attr_oversized(
+                                 ofpbuf_size(op->u.execute.packet)))) {
+                /* Report an error immediately if this is the first operation.
+                 * Otherwise the easiest thing to do is to postpone to the next
+                 * call (when this will be the first operation). */
+                if (i == 0) {
+                    VLOG_ERR_RL(&error_rl,
+                                "dropping oversized %"PRIu32"-byte packet",
+                                ofpbuf_size(op->u.execute.packet));
+                    op->error = ENOBUFS;
+                    return 1;
+                }
+                n_ops = i;
+            } else {
+                dpif_netlink_encode_execute(dpif->dp_ifindex, &op->u.execute,
+                                            &aux->request);
+            }
             break;
 
         case DPIF_OP_FLOW_GET:
@@ -1699,6 +1710,8 @@ dpif_netlink_operate__(struct dpif_netlink *dpif,
         ofpbuf_uninit(&aux->request);
         ofpbuf_uninit(&aux->reply);
     }
+
+    return n_ops;
 }
 
 static void
@@ -1707,8 +1720,7 @@ dpif_netlink_operate(struct dpif *dpif_, struct dpif_op **ops, size_t n_ops)
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
 
     while (n_ops > 0) {
-        size_t chunk = MIN(n_ops, MAX_OPS);
-        dpif_netlink_operate__(dpif, ops, chunk);
+        size_t chunk = dpif_netlink_operate__(dpif, ops, n_ops);
         ops += chunk;
         n_ops -= chunk;
     }
@@ -1741,67 +1753,6 @@ dpif_netlink_handler_uninit(struct dpif_handler *handler)
     close(handler->epoll_fd);
 }
 #endif
-
-/* Checks support for unique flow identifiers. */
-static bool
-dpif_netlink_check_ufid__(struct dpif *dpif_)
-{
-    struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
-    struct flow flow;
-    struct odputil_keybuf keybuf;
-    struct ofpbuf key, *replybuf;
-    struct dpif_netlink_flow reply;
-    ovs_u128 ufid;
-    int error;
-    bool enable_ufid = false;
-
-    memset(&flow, 0, sizeof flow);
-    flow.dl_type = htons(0x1234);
-
-    ofpbuf_use_stack(&key, &keybuf, sizeof keybuf);
-    odp_flow_key_from_flow(&key, &flow, NULL, 0, true);
-    dpif_flow_hash(dpif_, ofpbuf_data(&key), ofpbuf_size(&key), &ufid);
-    error = dpif_flow_put(dpif_, DPIF_FP_CREATE | DPIF_FP_PROBE,
-                          ofpbuf_data(&key), ofpbuf_size(&key), NULL, 0, NULL,
-                          0, &ufid, NULL);
-
-    if (error && error != EEXIST) {
-        VLOG_WARN("%s: UFID feature probe failed (%s).",
-                  dpif_name(dpif_), ovs_strerror(error));
-        return false;
-    }
-
-    error = dpif_netlink_flow_get__(dpif, NULL, 0, &ufid, true, &reply,
-                                    &replybuf);
-    if (!error && reply.ufid_present && ovs_u128_equal(&ufid, &reply.ufid)) {
-        enable_ufid = true;
-    }
-    ofpbuf_delete(replybuf);
-
-    error = dpif_netlink_flow_del(dpif, ofpbuf_data(&key), ofpbuf_size(&key),
-                                  &ufid, false);
-    if (error) {
-        VLOG_WARN("%s: failed to delete UFID feature probe flow",
-                  dpif_name(dpif_));
-    }
-
-    return enable_ufid;
-}
-
-static bool
-dpif_netlink_check_ufid(struct dpif *dpif_)
-{
-    const struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
-
-    if (dpif->ufid_supported) {
-        VLOG_INFO("%s: Datapath supports userspace flow ids",
-                  dpif_name(dpif_));
-    } else {
-        VLOG_INFO("%s: Datapath does not support userspace flow ids",
-                  dpif_name(dpif_));
-    }
-    return dpif->ufid_supported;
-}
 
 /* Synchronizes 'channels' in 'dpif->handlers'  with the set of vports
  * currently in 'dpif' in the kernel, by adding a new set of channels for
@@ -2359,7 +2310,6 @@ const struct dpif_class dpif_netlink_class = {
     NULL,                       /* enable_upcall */
     NULL,                       /* disable_upcall */
     dpif_netlink_get_datapath_version, /* get_datapath_version */
-    dpif_netlink_check_ufid,
 };
 
 static int

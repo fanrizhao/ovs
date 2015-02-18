@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,8 +39,8 @@
 #include "simap.h"
 #include "stream.h"
 #include "timeval.h"
-#include "vconn.h"
-#include "vlog.h"
+#include "openvswitch/vconn.h"
+#include "openvswitch/vlog.h"
 
 #include "bundles.h"
 
@@ -60,7 +60,7 @@ static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
 struct ofconn {
 /* Configuration that persists from one connection to the next. */
 
-    struct list node;           /* In struct connmgr's "all_conns" list. */
+    struct ovs_list node;       /* In struct connmgr's "all_conns" list. */
     struct hmap_node hmap_node; /* In struct connmgr's "controllers" map. */
 
     struct connmgr *connmgr;    /* Connection's manager. */
@@ -131,7 +131,7 @@ struct ofconn {
      *
      * When 'updates' is nonempty, 'sent_abbrev_update' is true if 'updates'
      * contains an update event of type NXFME_ABBREV and false otherwise.. */
-    struct list updates OVS_GUARDED_BY(ofproto_mutex);
+    struct ovs_list updates OVS_GUARDED_BY(ofproto_mutex);
     bool sent_abbrev_update OVS_GUARDED_BY(ofproto_mutex);
 
     /* Active bundles. Contains "struct ofp_bundle"s. */
@@ -162,7 +162,7 @@ static void ofconn_set_rate_limit(struct ofconn *, int rate, int burst);
 static void ofconn_send(const struct ofconn *, struct ofpbuf *,
                         struct rconn_packet_counter *);
 
-static void do_send_packet_ins(struct ofconn *, struct list *txq);
+static void do_send_packet_ins(struct ofconn *, struct ovs_list *txq);
 
 /* A listener for incoming OpenFlow "service" connections. */
 struct ofservice {
@@ -195,8 +195,8 @@ struct connmgr {
     char *local_port_name;
 
     /* OpenFlow connections. */
-    struct hmap controllers;   /* All OFCONN_PRIMARY controllers. */
-    struct list all_conns;     /* All controllers. */
+    struct hmap controllers;     /* All OFCONN_PRIMARY controllers. */
+    struct ovs_list all_conns;   /* All controllers. */
     uint64_t master_election_id; /* monotonically increasing sequence number
                                   * for master election */
     bool master_election_id_defined;
@@ -996,6 +996,18 @@ void
 ofconn_set_protocol(struct ofconn *ofconn, enum ofputil_protocol protocol)
 {
     ofconn->protocol = protocol;
+    if (!(protocol & OFPUTIL_P_OF14_UP)) {
+        uint32_t *master = ofconn->master_async_config;
+        uint32_t *slave = ofconn->slave_async_config;
+
+        /* OFPR_ACTION_SET is not supported before OF1.4 */
+        master[OAM_PACKET_IN] &= ~(1u << OFPR_ACTION_SET);
+        slave [OAM_PACKET_IN] &= ~(1u << OFPR_ACTION_SET);
+
+        /* OFPR_GROUP is not supported before OF1.4 */
+        master[OAM_PACKET_IN] &= ~(1u << OFPR_GROUP);
+        slave [OAM_PACKET_IN] &= ~(1u << OFPR_GROUP);
+    }
 }
 
 /* Returns the currently configured packet in format for 'ofconn', one of
@@ -1056,6 +1068,13 @@ ofconn_get_async_config(struct ofconn *ofconn,
                         uint32_t *master_masks, uint32_t *slave_masks)
 {
     size_t size = sizeof ofconn->master_async_config;
+
+    /* Make sure we know the protocol version and the async_config
+     * masks are properly updated by calling ofconn_get_protocol() */
+    if (OFPUTIL_P_NONE == ofconn_get_protocol(ofconn)){
+        OVS_NOT_REACHED();
+    }
+
     memcpy(master_masks, ofconn->master_async_config, size);
     memcpy(slave_masks, ofconn->slave_async_config, size);
 }
@@ -1073,7 +1092,7 @@ ofconn_send_reply(const struct ofconn *ofconn, struct ofpbuf *msg)
 /* Sends each of the messages in list 'replies' on 'ofconn' in order,
  * accounting them as replies. */
 void
-ofconn_send_replies(const struct ofconn *ofconn, struct list *replies)
+ofconn_send_replies(const struct ofconn *ofconn, struct ovs_list *replies)
 {
     struct ofpbuf *reply, *next;
 
@@ -1235,7 +1254,10 @@ ofconn_flush(struct ofconn *ofconn)
         /* "master" and "other" roles get all asynchronous messages by default,
          * except that the controller needs to enable nonstandard "packet-in"
          * reasons itself. */
-        master[OAM_PACKET_IN] = (1u << OFPR_NO_MATCH) | (1u << OFPR_ACTION);
+        master[OAM_PACKET_IN] = ((1u << OFPR_NO_MATCH)
+                                 | (1u << OFPR_ACTION)
+                                 | (1u << OFPR_ACTION_SET)
+                                 | (1u << OFPR_GROUP));
         master[OAM_PORT_STATUS] = ((1u << OFPPR_ADD)
                                    | (1u << OFPPR_DELETE)
                                    | (1u << OFPPR_MODIFY));
@@ -1281,6 +1303,7 @@ ofconn_destroy(struct ofconn *ofconn)
     }
 
     ofp_bundle_remove_all(ofconn);
+    hmap_destroy(&ofconn->bundles);
 
     hmap_destroy(&ofconn->monitors);
     list_remove(&ofconn->node);
@@ -1334,7 +1357,7 @@ ofconn_run(struct ofconn *ofconn,
     size_t i;
 
     for (i = 0; i < N_SCHEDULERS; i++) {
-        struct list txq;
+        struct ovs_list txq;
 
         pinsched_run(ofconn->schedulers[i], &txq);
         do_send_packet_ins(ofconn, &txq);
@@ -1651,16 +1674,31 @@ connmgr_send_flow_removed(struct connmgr *mgr,
 static enum ofp_packet_in_reason
 wire_reason(struct ofconn *ofconn, const struct ofproto_packet_in *pin)
 {
-    if (pin->miss_type == OFPROTO_PACKET_IN_MISS_FLOW
-        && pin->up.reason == OFPR_ACTION) {
-        enum ofputil_protocol protocol = ofconn_get_protocol(ofconn);
+    enum ofputil_protocol protocol = ofconn_get_protocol(ofconn);
 
-        if (protocol != OFPUTIL_P_NONE
-            && ofputil_protocol_to_ofp_version(protocol) >= OFP13_VERSION) {
-            return OFPR_NO_MATCH;
-        }
+    if (pin->miss_type == OFPROTO_PACKET_IN_MISS_FLOW
+        && pin->up.reason == OFPR_ACTION
+        && protocol != OFPUTIL_P_NONE
+        && ofputil_protocol_to_ofp_version(protocol) >= OFP13_VERSION) {
+        return OFPR_NO_MATCH;
     }
-    return pin->up.reason;
+
+    switch (pin->up.reason) {
+    case OFPR_ACTION_SET:
+    case OFPR_GROUP:
+    case OFPR_PACKET_OUT:
+        if (!(protocol & OFPUTIL_P_OF14_UP)) {
+            /* Only supported in OF1.4+ */
+            return OFPR_ACTION;
+        }
+        /* Fall through. */
+	case OFPR_NO_MATCH:
+	case OFPR_ACTION:
+	case OFPR_INVALID_TTL:
+	case OFPR_N_REASONS:
+    default:
+        return pin->up.reason;
+    }
 }
 
 /* Given 'pin', sends an OFPT_PACKET_IN message to each OpenFlow controller as
@@ -1685,7 +1723,7 @@ connmgr_send_packet_in(struct connmgr *mgr,
 }
 
 static void
-do_send_packet_ins(struct ofconn *ofconn, struct list *txq)
+do_send_packet_ins(struct ofconn *ofconn, struct ovs_list *txq)
 {
     struct ofpbuf *pin, *next_pin;
 
@@ -1710,7 +1748,7 @@ schedule_packet_in(struct ofconn *ofconn, struct ofproto_packet_in pin,
 {
     struct connmgr *mgr = ofconn->connmgr;
     uint16_t controller_max_len;
-    struct list txq;
+    struct ovs_list txq;
 
     pin.up.total_len = pin.up.packet_len;
 
@@ -1946,6 +1984,23 @@ connmgr_flushed(struct connmgr *mgr)
 
         ofpbuf_uninit(&ofpacts);
     }
+}
+
+/* Returns the number of hidden rules created by the in-band and fail-open
+ * implementations in table 0.  (Subtracting this count from the number of
+ * rules in the table 0 classifier, as returned by classifier_count(), yields
+ * the number of flows that OVS should report via OpenFlow for table 0.) */
+int
+connmgr_count_hidden_rules(const struct connmgr *mgr)
+{
+    int n_hidden = 0;
+    if (mgr->in_band) {
+        n_hidden += in_band_count_rules(mgr->in_band);
+    }
+    if (mgr->fail_open) {
+        n_hidden += fail_open_count_rules(mgr->fail_open);
+    }
+    return n_hidden;
 }
 
 /* Creates a new ofservice for 'target' in 'mgr'.  Returns 0 if successful,
@@ -2229,7 +2284,7 @@ ofmonitor_resume(struct ofconn *ofconn)
     struct rule_collection rules;
     struct ofpbuf *resumed;
     struct ofmonitor *m;
-    struct list msgs;
+    struct ovs_list msgs;
 
     rule_collection_init(&rules);
     HMAP_FOR_EACH (m, ofconn_node, &ofconn->monitors) {

@@ -46,7 +46,8 @@ void match_set_dp_hash(struct match *, uint32_t value);
 void match_set_dp_hash_masked(struct match *, uint32_t value, uint32_t mask);
 
 void match_set_recirc_id(struct match *, uint32_t value);
-void match_set_recirc_id_masked(struct match *, uint32_t value, uint32_t mask);
+
+void match_set_conj_id(struct match *, uint32_t value);
 
 void match_set_reg(struct match *, unsigned int reg_idx, uint32_t value);
 void match_set_reg_masked(struct match *, unsigned int reg_idx,
@@ -70,6 +71,10 @@ void match_set_tun_tos(struct match *match, uint8_t tos);
 void match_set_tun_tos_masked(struct match *match, uint8_t tos, uint8_t mask);
 void match_set_tun_flags(struct match *match, uint16_t flags);
 void match_set_tun_flags_masked(struct match *match, uint16_t flags, uint16_t mask);
+void match_set_tun_gbp_id_masked(struct match *match, ovs_be16 gbp_id, ovs_be16 mask);
+void match_set_tun_gbp_id(struct match *match, ovs_be16 gbp_id);
+void match_set_tun_gbp_flags_masked(struct match *match, uint8_t flags, uint8_t mask);
+void match_set_tun_gbp_flags(struct match *match, uint8_t flags);
 void match_set_in_port(struct match *, ofp_port_t ofp_port);
 void match_set_pkt_mark(struct match *, uint32_t pkt_mark);
 void match_set_pkt_mark_masked(struct match *, uint32_t pkt_mark, uint32_t mask);

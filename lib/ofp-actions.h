@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -96,6 +96,7 @@
     /* Flow table interaction. */                                       \
     OFPACT(RESUBMIT,        ofpact_resubmit,    ofpact, "resubmit")     \
     OFPACT(LEARN,           ofpact_learn,       specs, "learn")         \
+    OFPACT(CONJUNCTION,     ofpact_conjunction, ofpact, "conjunction")  \
                                                                         \
     /* Arithmetic. */                                                   \
     OFPACT(MULTIPATH,       ofpact_multipath,   ofpact, "multipath")    \
@@ -611,6 +612,16 @@ enum nx_mp_algorithm {
     NX_MP_ALG_ITER_HASH = 3,
 };
 
+/* OFPACT_CONJUNCTION.
+ *
+ * Used for NXAST_CONJUNCTION. */
+struct ofpact_conjunction {
+    struct ofpact ofpact;
+    uint8_t clause;
+    uint8_t n_clauses;
+    uint32_t id;
+};
+
 /* OFPACT_MULTIPATH.
  *
  * Used for NXAST_MULTIPATH. */
@@ -749,10 +760,10 @@ uint32_t ofpacts_get_meter(const struct ofpact[], size_t ofpacts_len);
 void ofpacts_format(const struct ofpact[], size_t ofpacts_len, struct ds *);
 char *ofpacts_parse_actions(const char *, struct ofpbuf *ofpacts,
                             enum ofputil_protocol *usable_protocols)
-    WARN_UNUSED_RESULT;
+    OVS_WARN_UNUSED_RESULT;
 char *ofpacts_parse_instructions(const char *, struct ofpbuf *ofpacts,
                                  enum ofputil_protocol *usable_protocols)
-    WARN_UNUSED_RESULT;
+    OVS_WARN_UNUSED_RESULT;
 const char *ofpact_name(enum ofpact_type);
 
 /* Internal use by the helpers below. */
