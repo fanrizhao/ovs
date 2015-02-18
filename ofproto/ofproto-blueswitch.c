@@ -35,7 +35,7 @@
 #include <errno.h>
 #include <config.h>
 
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 #include "dpif.h"
 #include "ofproto/ofproto-provider.h"
 

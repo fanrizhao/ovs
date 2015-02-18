@@ -22,7 +22,7 @@
 
 #include "packets.h"
 #include "netdev-provider.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 #include "nf10_cfg.h"
 

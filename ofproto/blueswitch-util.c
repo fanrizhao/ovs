@@ -19,7 +19,7 @@
 #include "blueswitch-util.h"
 
 #include "meta-flow.h"
-#include "vlog.h"
+#include "openvswitch/vlog.h"
 
 VLOG_DEFINE_THIS_MODULE(blueswitch_util);
 
