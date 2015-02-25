@@ -135,6 +135,8 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         case MFF_TUN_FLAGS:
         case MFF_TUN_TOS:
         case MFF_TUN_TTL:
+        case MFF_TUN_GBP_ID:
+        case MFF_TUN_GBP_FLAGS:
 
         case MFF_METADATA:
         case MFF_IN_PORT:
@@ -184,6 +186,8 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         case MFF_ICMPV4_CODE:
         case MFF_ICMPV6_CODE:
 
+        case MFF_CONJ_ID:
+
         case MFF_TCP_FLAGS:
             return OFPERR_OFPBMC_BAD_FIELD;
 
@@ -207,26 +211,6 @@ bsw_extract_action(const struct ofpact *act,
                    struct instr_cursor *cursor,
                    bool as_write_action)
 {
-
-#define ADD_ACTION(a) \
-  do {                                                                          \
-    if (as_write_action) {                                                      \
-        if (cursor->next_write_action >= NUM_WRITE_ACTIONS) {                   \
-            VLOG_ERR("%s: write action buffer overflow when processing %s",     \
-                     __func__, ofpact_name(act->type));                         \
-            return OFPERR_OFPBAC_TOO_MANY;                                      \
-        }                                                                       \
-        instr->write_actions[cursor->next_write_action++] = a;                  \
-    } else {                                                                    \
-        if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {                   \
-            VLOG_ERR("%s: apply action buffer overflow when processing %s",     \
-                     __func__, ofpact_name(act->type));                         \
-            return OFPERR_OFPBAC_TOO_MANY;                                      \
-        }                                                                       \
-        instr->apply_actions[cursor->next_apply_action++] = a;                  \
-    }                                                                           \
-  } while (0)
-
     switch (act->type) {
     case OFPACT_GOTO_TABLE:
     {
@@ -253,7 +237,21 @@ bsw_extract_action(const struct ofpact *act,
         /* TODO: check port-mapping with ofproto layer */
         action_encoding_t a = make_output_action(PORT_NORMAL, out->port);
 
-        ADD_ACTION(a);
+        if (as_write_action) {
+            if (cursor->next_write_action >= NUM_WRITE_ACTIONS) {
+                VLOG_ERR("%s: write action buffer overflow when processing %s",
+                         __func__, ofpact_name(act->type));
+                return OFPERR_OFPBAC_TOO_MANY;
+            }
+            instr->write_actions[cursor->next_write_action++] = a;
+        } else {
+            if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {
+                VLOG_ERR("%s: apply action buffer overflow when processing %s",
+                         __func__, ofpact_name(act->type));
+                return OFPERR_OFPBAC_TOO_MANY;
+            }
+            instr->apply_actions[cursor->next_apply_action++] = a;
+        }
     }
     break;
 
@@ -310,10 +308,14 @@ bsw_extract_action(const struct ofpact *act,
     case OFPACT_STACK_POP:
     case OFPACT_STACK_PUSH:
     case OFPACT_STRIP_VLAN:
+    case OFPACT_CONJUNCTION:
         VLOG_ERR("%s: unsupported action %s", __func__, ofpact_name(act->type));
         return OFPERR_OFPBIC_UNSUP_INST;
 
     case OFPACT_WRITE_ACTIONS:
+        /* Write-Actions are not handled directly, so we should not see them
+           here.  See below.
+        */
         OVS_NOT_REACHED();
     }
 
@@ -364,71 +366,63 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
    return 0;
 }
 
+enum t_entry_state {
+  TE_EMPTY = 0,
+  TE_OCCUPIED,
+};
+
 struct t_state {
     uint32_t                n_entries;
     enum t_entry_state      entries[];
 };
 
-struct t_state *
-bsw_init_table_state(uint32_t n_entries)
+static struct t_state *
+bsw_init_empty_table_state(uint32_t n_entries)
 {
     struct t_state *t;
-    size_t sz = sizeof(*t) + 4*sizeof(n_entries);
+    size_t sz = sizeof(*t) + n_entries * sizeof(t->entries[0]);
     t = (struct t_state *)xzalloc(sz);
-    if (t) {
+    if (t)
         t->n_entries = n_entries;
-    }
+    return t;
+}
+
+static struct t_state *
+bsw_init_table_state(struct t_state *s)
+{
+    struct t_state *t;
+    size_t sz = sizeof(*t) + s->n_entries * sizeof(t->entries[0]);
+    t = (struct t_state *)xzalloc(sz);
+    if (t)
+        memcpy(t, s, sz);
     return t;
 }
 
 struct t_update {
-    struct t_state *           t_state;
+    struct t_state *           t_working;
     uint32_t                   cmd_queue_len;
     uint32_t                   next_cmd;
     struct t_entry_update      cmds[];
 };
 
-struct t_update *
-bsw_init_table_update(struct t_state *table, uint32_t cmd_queue_len)
+/* In the current configuration model, we have a command queue of the same
+   length as the number of tcam entries.  Each command is inserted into the
+   queue at the position of the TCAM entry to which it applies.
+
+   This could be changed for a pure double-buffered model, where the number of
+   commands in the queue could be much smaller than the number of tcam entries.
+ */
+static struct t_update *
+bsw_init_table_update(struct t_state *initial, uint32_t cmd_queue_len)
 {
     struct t_update *u;
-    size_t sz = sizeof(*u) + cmd_queue_len*sizeof(struct t_entry_update);
+    size_t sz = sizeof(*u) + cmd_queue_len * sizeof(u->cmds[0]);
     u = (struct t_update *)xzalloc(sz);
     if (u) {
-        u->t_state = table;
+        u->t_working     = bsw_init_table_state(initial);
         u->cmd_queue_len = cmd_queue_len;
     }
     return u;
-}
-
-enum ofperr
-bsw_allocate_tcam_ent_update(struct t_update *table, enum t_entry_update_type t,
-                             struct t_entry_update **ent)
-{
-    for (int i = table->next_cmd; i < table->cmd_queue_len; i++) {
-        struct t_entry_update *u = &table->cmds[i];
-
-        switch (u->type) {
-        case TEM_UPDATE:
-            break;
-        case TEM_DELETE:
-            if (t == TEM_UPDATE) {
-                /* Instead of deleting this entry, we can just overwrite it. */
-                u->type = t;
-                *ent = u;
-                table->next_cmd = i+1;
-                return 0;
-            }
-            break;
-        case TEM_NOCHANGE:
-            u->type = t;
-            *ent = u;
-            table->next_cmd = i+1;
-            return 0;
-        }
-    }
-    *ent = NULL;
-    return OFPERR_OFPFMFC_TABLE_FULL;
 }
 
 void
@@ -436,12 +430,12 @@ bsw_initialize_switch_state(const struct bs_info *bsi, struct s_state *s)
 {
     s->n_tables = bsi->num_tcams;
     s->table_states  = (struct t_state **)xmalloc(bsi->num_tcams
-                                                  * sizeof(* (s->table_states)));
+                                                  * sizeof(s->table_states[0]));
     s->table_updates = (struct t_update **)xmalloc(bsi->num_tcams
-                                                   * sizeof(* (s->table_updates)));
+                                                   * sizeof(s->table_updates[0]));
     for (int i = 0; i < bsi->num_tcams; i++) {
         const struct tcam_info *tci = &bsi->tcams[i];
-        struct t_state *t = bsw_init_table_state(tci->num_entries);
+        struct t_state *t   = bsw_init_empty_table_state(tci->num_entries);
         s->table_states[i]  = t;
         s->table_updates[i] = bsw_init_table_update(t, tci->num_entries);
     }
@@ -456,4 +450,150 @@ bsw_destroy_switch_state(struct s_state *s)
     }
     free(s->table_states);
     free(s->table_updates);
+}
+
+enum ofperr
+bsw_allocate_tcam_ent_update(struct t_update *table, enum t_entry_update_type t,
+                             struct t_entry_update **ent, int *cmd_idx, int *tcam_idx)
+{
+    int idx;
+    struct t_entry_update *u;
+    struct t_state *state = table->t_working;
+
+    ovs_assert(cmd_idx && tcam_idx);
+
+    /* Ensure we haven't changed our configuration model. */
+    ovs_assert(state->n_entries == table->cmd_queue_len);
+
+    /* In this mode, if we are trying to delete or update an existing entry, we
+     * know which slot to use: the same slot in the cmd_queue as the index of
+     * the TCAM entry.
+     */
+    if (t == TEM_DELETE || t == TEM_UPDATE) {
+        const char *cmd = t == TEM_DELETE ? "DELETE" : "UPDATE";
+        /* We should be deleting an existing entry. */
+        if (*tcam_idx < 0) {
+            VLOG_WARN("cannot %s a rule not (yet?) in table!", cmd);
+            return OFPERR_OFPFMFC_UNSUPPORTED;
+        }
+
+        ovs_assert(*tcam_idx < state->n_entries);
+
+        /* Warn if we are deleting or updating an empty entry. */
+        if (state->entries[*tcam_idx] == TE_EMPTY)
+            VLOG_WARN("%s-ing an empty entry!", cmd);
+
+        /* If we are updating, ensure that the entry is marked as occupied. */
+        if (t == TEM_UPDATE)
+            state->entries[*tcam_idx] = TE_OCCUPIED;
+
+        u = &table->cmds[*tcam_idx];
+        u->type       = t;
+        u->tcam_idx_p = tcam_idx;
+
+        *ent          = u;
+        *cmd_idx      = *tcam_idx;
+        return 0;
+    }
+
+    /* To add a new entry to the TCAM, we need to search for an available slot. */
+    for (idx = 0; idx < state->n_entries; idx++) {
+        enum t_entry_state s = state->entries[idx];
+        u = &table->cmds[idx];
+
+        /* We can re-use an entry that is going to be deleted anyway, or an
+         * unused entry with no pending update.  The order is important below,
+         * since we allow deleting an empty entry.
+         */
+        if (u->type == TEM_DELETE)
+            break;
+        if (s == TE_EMPTY) {
+            ovs_assert(u->type == 0);
+            break;
+        }
+    }
+    if (idx >= state->n_entries)
+        return OFPERR_OFPFMFC_TABLE_FULL;
+
+    state->entries[idx] = TE_OCCUPIED;
+    u->type       = t;
+    u->tcam_idx_p = tcam_idx;
+
+    *ent          = u;
+    *cmd_idx      = idx;
+    return 0;
+}
+
+void
+bsw_convert_update_to_delete(struct t_update *table, int cmd_idx, int *tcam_idx)
+{
+    struct t_state *state = table->t_working;
+
+    ovs_assert(cmd_idx > 0 && cmd_idx < table->cmd_queue_len);
+    ovs_assert(tcam_idx && *tcam_idx >= 0 && *tcam_idx < state->n_entries);
+
+    struct t_entry_update *u = &table->cmds[cmd_idx];
+
+    /* This should be called for an existing entry. */
+    ovs_assert(state->entries[*tcam_idx] == TE_OCCUPIED);
+
+    /* We should have a valid update pending for this entry. */
+    ovs_assert(u->type != 0);
+    ovs_assert(u->tcam_idx_p == NULL || u->tcam_idx_p == tcam_idx);
+
+    /* Mark the entry for delete, and remove the back-pointer. */
+    u->type = TEM_DELETE;
+    u->tcam_idx_p = NULL;
+}
+
+static enum ofperr
+bsw_update_table(struct bs_info *bsi, struct s_state *s, uint8_t table_id)
+{
+    /* TODO
+       - need a bitvector state containing current occupancy of tcam entries
+       - create a working copy of the state
+       - for each delete command, mark the entry as available
+       - for each modify action, use the stored tcam_idx in the rule to set the
+         idx of the tcam_set_entry command
+       - for each add action, allocate a free idx from the working bitmap, mark
+         it as used, and store the idx in the update cmd entry
+
+       - convert each update entry into a config command, and send it
+         to nf10
+     */
+    return 0;
+}
+
+static enum ofperr
+bsw_commit(struct bs_info *bsi, struct s_state *s)
+{
+    /* TODO
+       - perform the pipeline activation
+       - make the working occupancy bitmap of each table the current bitmap
+     */
+    return 0;
+}
+
+enum ofperr
+bsw_commit_updates(struct bs_info *bsi, struct s_state *s)
+{
+    enum ofperr ret;
+
+    for (int i = bsi->num_tcams - 1; i >= 0; i--) {
+        ret = bsw_update_table(bsi, s, (uint8_t)i);
+        if (ret) break;
+    }
+
+    if (!ret)
+        ret = bsw_commit(bsi, s);
+
+    /* Always reset update state, even on commit failure. */
+    s->txn_counter++;
+    for (int i = 0; i < bsi->num_tcams; i++) {
+        struct t_update *u = s->table_updates[i];
+        u->next_cmd = 0;
+        memset(&u->cmds[0], 0, u->cmd_queue_len * sizeof(u->cmds[0]));
+    }
+
+    return ret;
 }

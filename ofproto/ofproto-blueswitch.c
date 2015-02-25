@@ -414,6 +414,10 @@ rule_choose_table(const struct ofproto *ofproto OVS_UNUSED,
 struct rule_blueswitch {
     struct rule up;
 
+    uint32_t txn_counter;   /* Last txn_counter at which this rule was configured */
+    int cmd_queue_idx;      /* index into cmd queue for any pending update */
+    int tcam_idx;           /* index into tcam at which this rule is stored */
+
     struct ovs_mutex stats_mutex;
     struct dpif_flow_stats stats OVS_GUARDED;
 };
@@ -434,6 +438,10 @@ rule_construct(struct rule *rule_)
     OVS_NO_THREAD_SAFETY_ANALYSIS
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
+    rule->txn_counter = 0;
+    rule->cmd_queue_idx = -1;
+    rule->tcam_idx = -1;
+
     ovs_mutex_init_adaptive(&rule->stats_mutex);
     rule->stats.n_packets = 0;
     rule->stats.n_bytes = 0;
@@ -443,11 +451,9 @@ rule_construct(struct rule *rule_)
 }
 
 static enum ofperr
-rule_insert(struct rule *rule)
-    OVS_REQUIRES(ofproto_mutex)
+process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
 {
-    ovs_mutex_lock(&rule->mutex);
-
+    struct rule_blueswitch *brule      = rule_blueswitch_cast(rule);
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
     struct bs_info *bsi                = bswitch->bs_info;
     struct s_state *s_state            = &bswitch->s_state;
@@ -455,7 +461,6 @@ rule_insert(struct rule *rule)
     ovs_assert(rule->table_id < bsi->num_tcams);
 
     const struct tcam_info *tcam = &bsi->tcams[rule->table_id];
-    struct t_state *t_state      = s_state->table_states[rule->table_id];
     struct t_update *t_update    = s_state->table_updates[rule->table_id];
 
     /* Expand the compressed minimatch.  We can't directly use the compressed
@@ -467,7 +472,11 @@ rule_insert(struct rule *rule)
 
     enum ofperr ret;
     struct t_entry_update *ent_update;
-    ret = bsw_allocate_tcam_ent_update(t_update, TEM_UPDATE, &ent_update);
+
+    brule->txn_counter = s_state->txn_counter;
+    ret = bsw_allocate_tcam_ent_update(t_update, u_type,
+                                       &ent_update, &brule->cmd_queue_idx,
+                                       &brule->tcam_idx);
     if (ret) goto error;
 
     ret = bsw_extract_tcam_key(tcam, &match, &ent_update->key);
@@ -476,21 +485,107 @@ rule_insert(struct rule *rule)
     ret = bsw_extract_instruction(tcam, rule_get_actions(rule), &ent_update->instr);
     if (ret) goto error;
 
-    /* XXX: TODO: Now program the darn switch.  Need to allocate an index for
-     * the rule.
+    /* TODO: In order to support rule delete, we need to store the table index
+     * at which this rule is eventually written at commit.  Since the commit can
+     * be done later, we will not know the index at this time.
+
+     * Since the rule could be deleted before the commit, we will also need to
+     * track its pending update state, so that this can be cleared on delete.
      */
 
+    /* NOTE: In a true bundle-mode, the below code should not be executed here,
+       but at the time of bundle commit.  Before the bundle commit, the updates
+       from all of the rule modifications can be collected.  At the time of the
+       commit, each table is updated, and the transaction can then be committed.
+    */
+
+    ret = bsw_commit_updates(bsi, s_state);
+
 error:
+    return ret;
+}
+
+static enum ofperr
+rule_insert(struct rule *rule)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    enum ofperr ret;
+
+    ovs_mutex_lock(&rule->mutex);
+    ret = process_add_or_modify_rule(rule, TEM_ADD);
     ovs_mutex_unlock(&rule->mutex);
+
     return ret;
 }
 
 static void
-rule_delete(struct rule *rule_)
+rule_modify_actions(struct rule *rule, bool reset_counters)
     OVS_REQUIRES(ofproto_mutex)
 {
-    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
-    (void)rule;
+    (void)reset_counters;
+
+    ovs_mutex_lock(&rule->mutex);
+    process_add_or_modify_rule(rule, TEM_UPDATE);
+    ovs_mutex_unlock(&rule->mutex);
+}
+
+
+static void
+rule_delete(struct rule *rule)
+    OVS_REQUIRES(ofproto_mutex)
+{
+    ovs_mutex_lock(&rule->mutex);
+    /* TODO:
+
+       We need to handle the following situations.
+
+       1.  The rule being deleted was not yet committed to the switch.  In this
+       case, we might just need to update the set of pending updates.
+
+       We could keep track of a s_state->transaction_counter and an
+       update_cmd_idx for the table in rule.  When the rule_delete is received,
+       if the transaction counter still matches, and the cmd_idx is still
+       pointing to this rule, the update is removed from the update_cmd queue
+       for the table, and any pointer back to the rule (see below) is cleared.
+
+       2.  The rule being deleted was written to the switch table.  In this
+       case, we need to create a delete command using its index in the table.
+
+       Since the index will be known at the time of the commit, we need to write
+       this index into the rule at the time of the commit.  To find the rule at
+       the time of the commit, we could store a pointer to the rule in the
+       t_entry_update.  Since the update entries are cleared out when the commit
+       finishes, we should not have dangling pointers.
+     */
+
+    struct rule_blueswitch *brule      = rule_blueswitch_cast(rule);
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
+    struct bs_info *bsi                = bswitch->bs_info;
+    struct s_state *s_state            = &bswitch->s_state;
+
+    enum ofperr ret;
+
+    ovs_assert(rule->table_id < bsi->num_tcams);
+
+    struct t_update *t_update    = s_state->table_updates[rule->table_id];
+
+    /*   If we have any pending update in flight, convert it into a delete. */
+    if (brule->cmd_queue_idx > 0 && brule->txn_counter == s_state->txn_counter) {
+        bsw_convert_update_to_delete(t_update, brule->cmd_queue_idx, &brule->tcam_idx);
+        ret = 0;
+    } else {
+        if (brule->tcam_idx >= 0) {
+            /*
+             * We have an entry in the tcam; create a new delete update for this
+             * entry.
+             */
+            struct t_entry_update *ent_update;
+            ret = bsw_allocate_tcam_ent_update(t_update, TEM_DELETE,
+                                               &ent_update, &brule->cmd_queue_idx,
+                                               &brule->tcam_idx);
+        }
+    }
+    ovs_mutex_unlock(&rule->mutex);
 }
 
 static void
@@ -589,7 +684,7 @@ const struct ofproto_class ofproto_blueswitch_class = {
 
     .rule_execute = NULL,
     .rule_premodify_actions = NULL,
-    .rule_modify_actions = NULL,
+    .rule_modify_actions = rule_modify_actions,
 
     .set_frag_handling = NULL,
 
@@ -664,3 +759,11 @@ const struct ofproto_class ofproto_blueswitch_class = {
 
     .get_datapath_version = NULL,
 };
+
+/*
+
+  TODO: the current callback structure does not forward a table-mod call to the
+  ofproto layer from ofproto.c; instead it modifies a field in the table
+  directly and atomically.
+
+*/
