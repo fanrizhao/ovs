@@ -23,6 +23,23 @@
 
 VLOG_DEFINE_THIS_MODULE(blueswitch_util);
 
+enum t_entry_state {
+  TE_EMPTY = 0,
+  TE_OCCUPIED,
+};
+
+struct t_state {
+    uint32_t                n_entries;
+    enum t_entry_state      entries[];
+};
+
+struct t_update {
+    struct t_state *        t_working;
+    uint32_t                cmd_queue_len;
+    uint32_t                next_cmd;
+    struct t_entry_update   cmds[];
+};
+
 static void
 bsw_tcam_key_init(struct bsw_tcam_key *key)
 {
@@ -366,16 +383,6 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
    return 0;
 }
 
-enum t_entry_state {
-  TE_EMPTY = 0,
-  TE_OCCUPIED,
-};
-
-struct t_state {
-    uint32_t                n_entries;
-    enum t_entry_state      entries[];
-};
-
 static struct t_state *
 bsw_init_empty_table_state(uint32_t n_entries)
 {
@@ -397,13 +404,6 @@ bsw_init_table_state(struct t_state *s)
         memcpy(t, s, sz);
     return t;
 }
-
-struct t_update {
-    struct t_state *           t_working;
-    uint32_t                   cmd_queue_len;
-    uint32_t                   next_cmd;
-    struct t_entry_update      cmds[];
-};
 
 /* In the current configuration model, we have a command queue of the same
    length as the number of tcam entries.  Each command is inserted into the
@@ -547,52 +547,128 @@ bsw_convert_update_to_delete(struct t_update *table, int cmd_idx, int *tcam_idx)
 }
 
 static enum ofperr
-bsw_update_table(struct bs_info *bsi, struct s_state *s, uint8_t table_id)
+bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
 {
-    /* TODO
-       - need a bitvector state containing current occupancy of tcam entries
-       - create a working copy of the state
-       - for each delete command, mark the entry as available
-       - for each modify action, use the stored tcam_idx in the rule to set the
-         idx of the tcam_set_entry command
-       - for each add action, allocate a free idx from the working bitmap, mark
-         it as used, and store the idx in the update cmd entry
+    ovs_assert(table_id < bsi->num_tcams);
 
-       - convert each update entry into a config command, and send it
-         to nf10
-     */
+    struct tcam_cfg tcfg;
+    init_tcam_cfg(&tcfg, bsi->dev, bsi, table_id);
+
+    tcam_cmd_status_t res;
+    struct t_update *table = state->table_updates[table_id];
+    for (uint32_t i = 0; i < table->cmd_queue_len; i++) {
+        struct t_entry_update *cmd = &table->cmds[i];
+        switch (cmd->type) {
+        case TEM_DELETE:
+        {
+            /* Currently the index of the entry is the same as the index of the
+             * cmd in the cmd queue.  Note that cmd->tcam_idx_p may be invalid
+             * since the rule may be deleted and freed.
+             */
+            VLOG_DBG(" deleting entry %d from TCAM %d", i, table_id);
+            res = tcam_del_entry(&tcfg, i);
+            if (res != TCAM_CMDST_CLEAR) goto error;
+
+            table->t_working->entries[i] = TE_EMPTY;
+        }
+        break;
+
+        case TEM_UPDATE:
+        {
+            ovs_assert(cmd->tcam_idx_p && i == *cmd->tcam_idx_p);
+            ovs_assert(table->t_working->entries[i] == TE_OCCUPIED);
+
+            VLOG_DBG(" updating entry %d in TCAM %d", i, table_id);
+            res = tcam_set_entry(&tcfg, i, cmd->key.key_buf, cmd->key.n_valid_bytes, cmd->key.msk_buf,
+                                 (uint32_t *)&cmd->instr, sizeof(cmd->instr));
+            if (res != TCAM_CMDST_CLEAR) goto error;
+        }
+        break;
+
+        case TEM_ADD:
+        {
+            ovs_assert(table->t_working->entries[i] == TE_OCCUPIED);
+
+            VLOG_DBG(" adding entry %d to TCAM %d", i, table_id);
+            res = tcam_set_entry(&tcfg, i, cmd->key.key_buf, cmd->key.n_valid_bytes, cmd->key.msk_buf,
+                                 (uint32_t *)&cmd->instr, sizeof(cmd->instr));
+            if (res != TCAM_CMDST_CLEAR) goto error;
+
+            /* Store the tcam entry index back into the rule. */
+            *cmd->tcam_idx_p = i;
+        }
+        break;
+        }
+    }
+
+    res = tcam_end_txn(&tcfg);
+    if (res != TCAM_CMDST_CLEAR) goto error;
+
     return 0;
+
+error:
+    VLOG_ERR(" tcam cmd failed: %s", status_str(res));
+    return OFPERR_OFPFMFC_UNKNOWN;
 }
 
 static enum ofperr
-bsw_commit(struct bs_info *bsi, struct s_state *s)
+bsw_commit(struct bs_info *bsi)
 {
-    /* TODO
-       - perform the pipeline activation
-       - make the working occupancy bitmap of each table the current bitmap
-     */
+    tcam_cmd_status_t res;
+
+    /* Sanity check */
+    for (int table_id = 0; table_id < bsi->num_tcams; table_id++) {
+        struct tcam_cfg tcfg;
+        init_tcam_cfg(&tcfg, bsi->dev, bsi, table_id);
+
+        int flag = 0;
+        res = tcam_get_primed(&tcfg, &flag);
+        if (TCAM_CMDST_CLEAR != res) {
+            VLOG_ERR(" unable to ensure tcam %d is primed: %s", table_id, status_str(res));
+            return OFPERR_OFPFMFC_UNKNOWN;
+        } else if (!flag) {
+            VLOG_ERR(" tcam %d is not primed!", table_id);
+            return OFPERR_OFPFMFC_UNKNOWN;
+        }
+    }
+    VLOG_DBG(" activating committed config");
+
+    activate_pipeline(bsi);
+    int flag = is_pipeline_activated(bsi);
+    if (!flag) {
+        VLOG_ERR(" unable to activate pipeline!");
+        return OFPERR_OFPFMFC_UNKNOWN;
+    }
+
     return 0;
 }
 
 enum ofperr
-bsw_commit_updates(struct bs_info *bsi, struct s_state *s)
+bsw_commit_updates(struct bs_info *bsi, struct s_state *state)
 {
     enum ofperr ret;
 
-    for (int i = bsi->num_tcams - 1; i >= 0; i--) {
-        ret = bsw_update_table(bsi, s, (uint8_t)i);
+    for (int table_id = bsi->num_tcams - 1; table_id >= 0; table_id--) {
+        ret = bsw_update_table(bsi, state, (uint8_t)table_id);
         if (ret) break;
     }
 
     if (!ret)
-        ret = bsw_commit(bsi, s);
+        ret = bsw_commit(bsi);
 
     /* Always reset update state, even on commit failure. */
-    s->txn_counter++;
-    for (int i = 0; i < bsi->num_tcams; i++) {
-        struct t_update *u = s->table_updates[i];
+    state->txn_counter++;
+    for (int table_id = 0; table_id < bsi->num_tcams; table_id++) {
+        struct t_update *u = state->table_updates[table_id];
         u->next_cmd = 0;
         memset(&u->cmds[0], 0, u->cmd_queue_len * sizeof(u->cmds[0]));
+
+        /* Update the current table state */
+        if (!ret) {
+            struct t_state *s = state->table_states[table_id];
+            for (int i = 0; i < s->n_entries; i++)
+                s->entries[i] = u->t_working->entries[i];
+        }
     }
 
     return ret;

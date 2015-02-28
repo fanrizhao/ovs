@@ -24,8 +24,8 @@
 #define BLUESWITCH_MAX_TCAM_KEYLEN      4      /* in 32-bit words */
 
 struct bsw_tcam_key {
-  uint8_t key_buf[4 * BLUESWITCH_MAX_TCAM_KEYLEN];
-  uint8_t msk_buf[4 * BLUESWITCH_MAX_TCAM_KEYLEN];
+  uint32_t key_buf[BLUESWITCH_MAX_TCAM_KEYLEN];
+  uint32_t msk_buf[BLUESWITCH_MAX_TCAM_KEYLEN];
   uint32_t n_valid_bytes;
 };
 
