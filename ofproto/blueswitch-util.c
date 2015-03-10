@@ -57,7 +57,7 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
 
     /* This is based on meta-flow.c:mf_get_value(). */
 
-    for (int i = 0; i <= tcam->num_fields; i++) {
+    for (int i = 0; i < tcam->num_fields; i++) {
 
         /* Ensure there is sufficient space. */
         enum mf_field_id id = tcam->mf_fields[i];
