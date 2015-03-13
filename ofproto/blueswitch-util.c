@@ -64,6 +64,7 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         const struct mf_field *f = mf_from_id(id);
         ovs_assert(key->n_valid_bytes + f->n_bytes <= 4 * tcam->key_size);
 
+        VLOG_DBG("   extracting %d: %s for key", i, f->name);
         /* TODO: XXX: Check endianness of all fields! */
 
         switch (id) {
@@ -206,6 +207,8 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         case MFF_CONJ_ID:
 
         case MFF_TCP_FLAGS:
+
+            VLOG_DBG("   unsupported field %d: %s for key", i, f->name);
             return OFPERR_OFPBMC_BAD_FIELD;
 
         case MFF_N_IDS:
@@ -240,11 +243,13 @@ bsw_extract_action(const struct ofpact *act,
         }
         instr->flags |= INSTR_GOTOTABLE;
         instr->table_id = gt->table_id;
+        VLOG_DBG("   instr        += GOTO_TABLE %d", gt->table_id);
     }
     break;
 
     case OFPACT_CLEAR_ACTIONS:
         instr->flags |= INSTR_CLEARACTIONS;
+        VLOG_DBG("   instr        += CLEAR_ACTIONS");
         break;
 
     case OFPACT_OUTPUT:
@@ -261,6 +266,7 @@ bsw_extract_action(const struct ofpact *act,
                 return OFPERR_OFPBAC_TOO_MANY;
             }
             instr->write_actions[cursor->next_write_action++] = a;
+            VLOG_DBG("   instr[write] += OUTPUT %d", out->port);
         } else {
             if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {
                 VLOG_ERR("%s: apply action buffer overflow when processing %s",
@@ -268,6 +274,7 @@ bsw_extract_action(const struct ofpact *act,
                 return OFPERR_OFPBAC_TOO_MANY;
             }
             instr->apply_actions[cursor->next_apply_action++] = a;
+            VLOG_DBG("   instr[apply] += OUTPUT %d", out->port);
         }
     }
     break;
@@ -283,6 +290,7 @@ bsw_extract_action(const struct ofpact *act,
         instr->metadata_value = (uint32_t) meta->metadata;
         instr->metadata_mask  = (uint32_t) meta->mask;
         instr->flags         |= INSTR_SETMETADATA;
+        VLOG_DBG("   instr        += WRITE-METADATA %x/%x", instr->metadata_value, instr->metadata_mask);
     } break;
 
     case OFPACT_SET_FIELD:
@@ -552,6 +560,7 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
     ovs_assert(table_id < bsi->num_tcams);
 
     struct tcam_cfg tcfg;
+    VLOG_DBG(" initializing tcam config of table %d", table_id);
     init_tcam_cfg(&tcfg, bsi->dev, bsi, table_id);
 
     tcam_cmd_status_t res;
@@ -601,6 +610,7 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
         }
     }
 
+    VLOG_DBG(" ending config txn fo table %d", table_id);
     res = tcam_end_txn(&tcfg);
     if (res != TCAM_CMDST_CLEAR) goto error;
 
