@@ -15,6 +15,9 @@
  */
 
 #include <config.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 
 #include "netdev-blueswitch.h"
 
@@ -117,24 +120,33 @@ netdev_blueswitch_set_etheraddr(struct netdev *netdev_,
 
 static int
 netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
-                                uint8_t mac[ETH_ADDR_LEN] OVS_UNUSED)
+                                uint8_t mac[ETH_ADDR_LEN])
 {
-    VLOG_WARN("netdev_get_etheraddr(netdev(name=%s))", netdev_get_name(netdev_));
-    return EOPNOTSUPP;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        VLOG_WARN("netdev_set_etheraddr(netdev(name=%s)): error creating socket! (%s)",
+                  netdev_get_name(netdev_), ovs_strerror(errno));
+        return EOPNOTSUPP;
+    }
+
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+
+    ifr.ifr_addr.sa_family = AF_INET;
+    strncpy(ifr.ifr_name, netdev_get_name(netdev_), IFNAMSIZ-1);
+    if (0 != ioctl(fd, SIOCGIFHWADDR, &ifr)) {
+        VLOG_WARN("netdev_get_etheraddr(netdev(name=%s)): ioctl failed (%s)",
+                  netdev_get_name(netdev_), ovs_strerror(errno));
+        return EOPNOTSUPP;
+    }
+    memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ADDR_LEN);
+    return 0;
 }
 
 static int
 netdev_blueswitch_get_mtu(const struct netdev *netdev_, int *mtup OVS_UNUSED)
 {
     VLOG_WARN("netdev_get_mtu(netdev(name=%s))", netdev_get_name(netdev_));
-    return EOPNOTSUPP;
-}
-
-static int
-netdev_blueswitch_get_carrier(const struct netdev *netdev_,
-                              bool *carrier OVS_UNUSED)
-{
-    VLOG_WARN("netdev_get_carrier(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -217,7 +229,7 @@ const struct netdev_class netdev_blueswitch_class =
     .get_mtu                = netdev_blueswitch_get_mtu,
     .set_mtu                = NULL,
     .get_ifindex            = NULL,
-    .get_carrier            = netdev_blueswitch_get_carrier,
+    .get_carrier            = NULL,
 
     .get_carrier_resets     = NULL,
     .set_miimon_interval    = NULL,
