@@ -41,7 +41,8 @@ enum ofperr bsw_extract_tcam_key(const struct tcam_info *tcam,
    configuration 'tcam' into 'key' from the OvS 'actions'.  This overwrites any
    earlier information in 'instr'. */
 
-enum ofperr bsw_extract_instruction(const struct tcam_info *tcam,
+enum ofperr bsw_extract_instruction(const struct bs_info *bsi,
+                                    const struct tcam_info *tcam,
                                     const struct rule_actions *actions,
                                     struct instr_encoding *instr);
 

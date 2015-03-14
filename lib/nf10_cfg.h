@@ -247,6 +247,7 @@ typedef struct bs_info {
   uint32_t      stats_base_addr;
   uint32_t      pipeline_base_addr;
   uint32_t      num_ports;
+  uint32_t      dma_port;
   uint32_t      num_tcams;
   tcam_info_t   tcams[];
 } bs_info_t;

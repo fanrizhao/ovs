@@ -482,7 +482,7 @@ process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
     ret = bsw_extract_tcam_key(tcam, &match, &ent_update->key);
     if (ret) goto error;
 
-    ret = bsw_extract_instruction(tcam, rule_get_actions(rule), &ent_update->instr);
+    ret = bsw_extract_instruction(bsi, tcam, rule_get_actions(rule), &ent_update->instr);
     if (ret) goto error;
 
     /* TODO: In order to support rule delete, we need to store the table index
@@ -571,6 +571,8 @@ rule_delete(struct rule *rule)
 
     /*   If we have any pending update in flight, convert it into a delete. */
     if (brule->cmd_queue_idx > 0 && brule->txn_counter == s_state->txn_counter) {
+        VLOG_WARN("%s: deleting a pending update at idx %d",
+                  __func__, brule->cmd_queue_idx);
         bsw_convert_update_to_delete(t_update, brule->cmd_queue_idx, &brule->tcam_idx);
         ret = 0;
     } else {
@@ -583,6 +585,10 @@ rule_delete(struct rule *rule)
             ret = bsw_allocate_tcam_ent_update(t_update, TEM_DELETE,
                                                &ent_update, &brule->cmd_queue_idx,
                                                &brule->tcam_idx);
+            if (ret != 0) {
+                VLOG_WARN("%s: error allocating tcam ent update: %s",
+                          __func__, ofperr_to_string(ret));
+            }
         }
     }
     ovs_mutex_unlock(&rule->mutex);

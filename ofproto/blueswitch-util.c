@@ -226,7 +226,8 @@ struct instr_cursor {
 };
 
 static enum ofperr
-bsw_extract_action(const struct ofpact *act,
+bsw_extract_action(const struct bs_info *bsi,
+                   const struct ofpact *act,
                    struct instr_encoding *instr,
                    struct instr_cursor *cursor,
                    bool as_write_action)
@@ -256,7 +257,18 @@ bsw_extract_action(const struct ofpact *act,
     {
         struct ofpact_output *out = ofpact_get_OUTPUT(act);
 
-        /* TODO: check port-mapping with ofproto layer */
+        /* Remap the software-intercept port to the DMA port.  Currently, OvS is
+         * not hooked up to the DMA port, so that is effectively a /dev/null.
+         */
+        if (out->port == OFPP_NORMAL) {
+            out->port = bsi->dma_port;
+        }
+        /* Check if the output port is within range. */
+        if (out->port >= bsi->num_ports) {
+            VLOG_ERR("%s: output port is out-of-range (%d exceeds num_ports %d)",
+                     __func__, out->port, bsi->num_ports);
+            return OFPERR_OFPBAC_BAD_OUT_PORT;
+        }
         action_encoding_t a = make_output_action(PORT_NORMAL, out->port);
 
         if (as_write_action) {
@@ -351,7 +363,8 @@ bsw_extract_action(const struct ofpact *act,
    configuration 'tcam' into 'key' from the OvS 'rule'. */
 
 enum ofperr
-bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
+bsw_extract_instruction(const struct bs_info *bsi,
+                        const struct tcam_info *tcam OVS_UNUSED,
                         const struct rule_actions *actions,
                         struct instr_encoding *instr)
 {
@@ -378,12 +391,12 @@ bsw_extract_instruction(const struct tcam_info *tcam OVS_UNUSED,
                  nact < ofpact_end(nest->actions, nest_action_len);
                  nact = ofpact_next(nact)) {
 
-                if ((ret = bsw_extract_action(nact, instr, &cursor, true)) != 0)
+                if ((ret = bsw_extract_action(bsi, nact, instr, &cursor, true)) != 0)
                     return ret;
             }
         } else {
             /* Process this as in an Apply-Action instruction. */
-            if ((ret = bsw_extract_action(act, instr, &cursor, false)) != 0)
+            if ((ret = bsw_extract_action(bsi, act, instr, &cursor, false)) != 0)
                 return ret;
         }
     }
