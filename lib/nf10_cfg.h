@@ -102,6 +102,7 @@ typedef struct tcam_cfg {
   /* used for sanity checks */
   uint32_t  key_size;   /* in 32-bit words */
   uint32_t  val_size;   /* in 32-bit words */
+  uint32_t  num_entries;
 } tcam_cfg_t;
 
 typedef struct tcam_cmd_buf {
@@ -229,7 +230,7 @@ void print_instruction(instr_encoding_t *instr);
 
 typedef struct tcam_info {
   uint32_t base_addr;
-  uint16_t num_entries;
+  uint32_t num_entries;
   uint32_t key_size;
   uint32_t val_size;
 
@@ -249,11 +250,12 @@ typedef struct bs_info {
   uint32_t      num_ports;
   uint32_t      dma_port;
   uint32_t      num_tcams;
+  uint32_t      dummy;
   tcam_info_t   tcams[];
 } bs_info_t;
 
 /* Initialize the config handle a particular tcam from the switch config. */
-void init_tcam_cfg(tcam_cfg_t *cfg, int dev, bs_info_t *bsi, int ntcam);
+void init_tcam_cfg(tcam_cfg_t *cfg, int dev, const bs_info_t *bsi, int ntcam);
 
 int is_pipeline_activated(bs_info_t *bsi);
 void activate_pipeline(bs_info_t *bsi);

@@ -461,19 +461,20 @@ instr_encoding_t make_goto_instr(uint8_t table) {
 
 /** Pipeline management interface **/
 
-void init_tcam_cfg(tcam_cfg_t *cfg, int dev, bs_info_t *bsi, int ntcam) {
+void init_tcam_cfg(tcam_cfg_t *cfg, int dev, const bs_info_t *bsi, int ntcam) {
   cfg->dev = dev;
   fprintf(stdout, "Initializing cfg for tcam %d ...\n", ntcam);
 
-  struct tcam_info *tci = &bsi->tcams[ntcam];
-  cfg->base_addr  = (uint32_t *)(uintptr_t)tci->base_addr;
+  struct tcam_info tci = bsi->tcams[ntcam];
+  cfg->base_addr  = (uint32_t *)(uintptr_t)tci.base_addr;
   cfg->status_ofs = 0;
   cfg->set_ofs    = cfg->status_ofs + 1;
   cfg->get_ofs    = cfg->set_ofs + 22;
   cfg->trig_ofs   = cfg->get_ofs + 22;
 
-  cfg->key_size   = tci->key_size;
-  cfg->val_size   = tci->val_size;
+  cfg->key_size   = tci.key_size;
+  cfg->val_size   = tci.val_size;
+  cfg->num_entries = tci.num_entries;
 
   ASSERT(tcam_check_cfg(cfg));
 }
