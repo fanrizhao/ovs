@@ -573,8 +573,9 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
     ovs_assert(table_id < bsi->num_tcams);
 
     struct tcam_cfg tcfg;
-    VLOG_DBG(" initializing tcam config of table %d", table_id);
     init_tcam_cfg(&tcfg, bsi->dev, bsi, table_id);
+    VLOG_DBG(" initialized tcam config of table %d: key_size=%d val_size=%d",
+             table_id, tcfg.key_size, tcfg.val_size);
 
     tcam_cmd_status_t res;
     struct t_update *table = state->table_updates[table_id];
@@ -695,4 +696,33 @@ bsw_commit_updates(struct bs_info *bsi, struct s_state *state)
     }
 
     return ret;
+}
+
+static void
+print_tcam_cfg(const struct tcam_cfg *cfg)
+{
+    VLOG_DBG("\t\t Key-Size:%d", cfg->key_size);
+    VLOG_DBG("\t\t Val-Size:%d", cfg->val_size);
+    VLOG_DBG("\t\t Num-Entries:%d", cfg->num_entries);
+}
+static void
+print_tcam_info(const struct tcam_info *nfo)
+{
+    VLOG_DBG("\t\t Key-Size:%d", nfo->key_size);
+    VLOG_DBG("\t\t Val-Size:%d", nfo->val_size);
+    VLOG_DBG("\t\t Num-Entries:%d", nfo->num_entries);
+}
+
+void
+print_bsi_config(const struct bs_info *bsi)
+{
+    VLOG_DBG("Blueswitch config:");
+    VLOG_DBG("\t # Ports: %d", bsi->num_ports);
+    VLOG_DBG("\t DMA port: %d", bsi->dma_port);
+    VLOG_DBG("\t # Tables: %d", bsi->num_tcams);
+    for (int i = 0; i < bsi->num_tcams; i++) {
+        VLOG_DBG("\t Table %d:", i);
+        print_tcam_info(&bsi->tcams[i]);
+        VLOG_DBG("");
+    }
 }

@@ -154,6 +154,8 @@ construct(struct ofproto *ofproto)
 
     bsw_initialize_switch_state(bswitch->bs_info, &bswitch->s_state);
 
+    print_bsi_config(bswitch->bs_info);
+
     /* TODO:
      *
      * Each flow table will be initially empty, so ->construct() should delete

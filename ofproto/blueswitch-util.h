@@ -88,4 +88,5 @@ void bsw_destroy_switch_state(struct s_state *s);
 
 enum ofperr bsw_commit_updates(struct bs_info *bsi, struct s_state *s);
 
+void print_bsi_config(const struct bs_info *bsi);
 #endif /* BLUESWITCH_UTIL_H */
