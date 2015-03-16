@@ -486,6 +486,8 @@ process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
 
     ret = bsw_extract_instruction(bsi, tcam, rule_get_actions(rule), &ent_update->instr);
     if (ret) goto error;
+    VLOG_DBG(" adding rule with instruction:");
+    print_instruction(&ent_update->instr);
 
     /* TODO: In order to support rule delete, we need to store the table index
      * at which this rule is eventually written at commit.  Since the commit can

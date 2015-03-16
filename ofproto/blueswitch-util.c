@@ -602,6 +602,10 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
             ovs_assert(table->t_working->entries[i] == TE_OCCUPIED);
 
             VLOG_DBG(" updating entry %d in TCAM %d", i, table_id);
+            VLOG_DBG("    [exp] key_buflen=%d val_buflen=%d",
+                     4*tcfg.key_size, 4*tcfg.val_size);
+            VLOG_DBG("    [in] key_buflen=%u val_buflen=%lu",
+                     cmd->key.n_valid_bytes, sizeof(cmd->instr));
             res = tcam_set_entry(&tcfg, i, cmd->key.key_buf, cmd->key.n_valid_bytes, cmd->key.msk_buf,
                                  (uint32_t *)&cmd->instr, sizeof(cmd->instr));
             if (res != TCAM_CMDST_CLEAR) goto error;
@@ -613,6 +617,10 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
             ovs_assert(table->t_working->entries[i] == TE_OCCUPIED);
 
             VLOG_DBG(" adding entry %d to TCAM %d", i, table_id);
+            VLOG_DBG("    [exp] key_buflen=%d val_buflen=%d",
+                     4*tcfg.key_size, 4*tcfg.val_size);
+            VLOG_DBG("    [in] key_buflen=%u val_buflen=%lu",
+                     cmd->key.n_valid_bytes, sizeof(cmd->instr));
             res = tcam_set_entry(&tcfg, i, cmd->key.key_buf, cmd->key.n_valid_bytes, cmd->key.msk_buf,
                                  (uint32_t *)&cmd->instr, sizeof(cmd->instr));
             if (res != TCAM_CMDST_CLEAR) goto error;
