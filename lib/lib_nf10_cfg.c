@@ -50,6 +50,10 @@
 #include "nf10_config.h"
 #include "nf10_cfg.h"
 
+#include "openvswitch/vlog.h"
+
+VLOG_DEFINE_THIS_MODULE(lib_nf10);
+
 #define ERRBUF_LEN 256
 
 /** Device interface **/
@@ -59,12 +63,12 @@ static int do_rw  = 1;
 
 static void log_read(uint32_t addr, uint32_t val) {
   if (do_log)
-    fprintf(stdout, "rd: [0x%x] -> 0x%x\n", addr, val);
+    VLOG_DBG("rd: [0x%x] -> 0x%x", addr, val);
 }
 
 static void log_write(uint32_t addr, uint32_t val) {
   if (do_log)
-    fprintf(stdout, "wr: [0x%x] <- 0x%x\n", addr, val);
+    VLOG_DBG("wr: [0x%x] <- 0x%x", addr, val);
 }
 
 const char *status_str(tcam_cmd_status_t st) {
@@ -86,7 +90,7 @@ const char *status_str(tcam_cmd_status_t st) {
 
 static void log_status(tcam_cmd_status_t st) {
   if (do_log)
-    fprintf(stdout, "st: %s [0x%x]\n", status_str(st), st);
+    VLOG_DBG("st: %s [0x%x]", status_str(st), st);
 }
 
 int open_device(void) {
@@ -96,7 +100,7 @@ int open_device(void) {
   if (do_rw && (dev < 0)) {
     errbuf[0] = 0;
     (void) strerror_r(errno, errbuf, ERRBUF_LEN);
-    fprintf(stdout, "Error opening %s: %s\n", DEVICE_FILE, errbuf);
+    VLOG_DBG("Error opening %s: %s", DEVICE_FILE, errbuf);
   }
   return dev;
 }
@@ -109,8 +113,8 @@ uint32_t read_register(int dev, uint32_t addr) {
   if (do_rw && (ioctl(dev, IOCTL_READ_REG, &daddr) < 0)) {
     errbuf[0] = 0;
     (void) strerror_r(errno, errbuf, ERRBUF_LEN);
-    fprintf(stdout, "error reading %s [0x%x]: %s\n",
-            DEVICE_FILE, addr, errbuf);
+    VLOG_DBG("error reading %s [0x%x]: %s",
+             DEVICE_FILE, addr, errbuf);
     exit(1);
   }
   val = (uint32_t)(daddr & 0xFFFFFFFF);
@@ -125,8 +129,8 @@ void write_register(int dev, uint32_t addr, uint32_t val) {
   if (do_rw && (ioctl(dev, IOCTL_WRITE_REG, darg) < 0)) {
     errbuf[0] = 0;
     (void)strerror_r(errno, errbuf, ERRBUF_LEN);
-    fprintf(stdout, "error writing %s [0x%x <- %x]: %s\n",
-            DEVICE_FILE, addr, val, errbuf);
+    VLOG_DBG("error writing %s [0x%x <- %x]: %s",
+             DEVICE_FILE, addr, val, errbuf);
     exit(1);
   }
 }
@@ -172,21 +176,21 @@ int tcam_check_cfg(tcam_cfg_t *cfg) {
   */
   uint32_t cmd_size = 1 + cmd_buf_size(cfg);
   if (cfg->status_ofs != 0) {
-    fprintf(stderr, "Unexpected tcam status_offset %d (expected 0).\n", cfg->status_ofs);
+    VLOG_DBG("Unexpected tcam status_offset %d (expected 0).", cfg->status_ofs);
     return 0;
   }
   if (cfg->set_ofs != 1) {
-    fprintf(stderr, "Unexpected tcam set_offset %d (expected 1).\n", cfg->set_ofs);
+    VLOG_DBG("Unexpected tcam set_offset %d (expected 1).", cfg->set_ofs);
     return 0;
   }
   if (cfg->get_ofs  - cfg->set_ofs != cmd_size) {
-    fprintf(stderr, "tcam {get,set}_offset {%d,%d} gives unexpected cmd_size %d (expected %d).\n",
-            cfg->get_ofs, cfg->set_ofs, cfg->get_ofs  - cfg->set_ofs, cmd_size);
+    VLOG_DBG("tcam {get,set}_offset {%d,%d} gives unexpected cmd_size %d (expected %d).",
+             cfg->get_ofs, cfg->set_ofs, cfg->get_ofs  - cfg->set_ofs, cmd_size);
     return 0;
   }
   if (cfg->trig_ofs - cfg->get_ofs != cmd_size) {
-    fprintf(stderr, "tcam {trig,get}_offset {%d,%d} gives unexpected cmd_size %d (expected %d).\n",
-            cfg->trig_ofs, cfg->get_ofs, cfg->trig_ofs  - cfg->get_ofs, cmd_size);
+    VLOG_DBG("tcam {trig,get}_offset {%d,%d} gives unexpected cmd_size %d (expected %d).",
+             cfg->trig_ofs, cfg->get_ofs, cfg->trig_ofs  - cfg->get_ofs, cmd_size);
     return 0;
   }
   return 1;
@@ -296,8 +300,8 @@ tcam_cmd_status_t tcam_get_entry(tcam_cfg_t *cfg, uint16_t idx,
   if (TCAM_CMDST_CLEAR == st) {
     *is_valid = c->cmd;
     if (c->idx != idx) {
-      fprintf(stdout, "Entry-Get got unexpected index %x, expected %x! (check alignment)",
-              c->idx, idx);
+      VLOG_DBG("Entry-Get got unexpected index %x, expected %x! (check alignment)",
+               c->idx, idx);
     }
     memcpy(key_buf,  key_of_buf(cfg, c),  4*cfg->key_size);
     memcpy(mask_buf, mask_of_buf(cfg, c), 4*cfg->key_size);
@@ -387,43 +391,43 @@ static const char *port_type_str(uint32_t p) {
 }
 
 static void print_action(int i, action_encoding_t action) {
-  fprintf(stdout, "\t\t action[%d]: ", i);
+  VLOG_DBG("\t\t action[%d]: ", i);
   switch (action.act_type) {
   case ACT_NONE:
-    fprintf(stdout, "none");
+    VLOG_DBG("none");
     break;
   case ACT_OUTPUT:
-    fprintf(stdout, "output port=%x port-type=%s (%x) (pad=%x)",
-            action.act_val.output.port_num,
-            port_type_str(action.act_val.output.port_type), action.act_val.output.port_type,
-            action.act_val.output.pad);
+    VLOG_DBG("output port=%x port-type=%s (%x) (pad=%x)",
+             action.act_val.output.port_num,
+             port_type_str(action.act_val.output.port_type), action.act_val.output.port_type,
+             action.act_val.output.pad);
     break;
   default:
-    fprintf(stdout, "unknown type %x (check alignment and/or endianness)", action.act_type);
+    VLOG_DBG("unknown type %x (check alignment and/or endianness)", action.act_type);
   }
-  fprintf(stdout, "\n");
+  VLOG_DBG("\n");
 }
 
 void print_instruction(instr_encoding_t *instr) {
   int i;
   /* fprintf(stdout, "\t flags: 0x%x\n", instr->flags); */
   if (INSTR_GOTOTABLE & instr->flags)
-    fprintf(stdout, "\t goto-table: %u\n", instr->table_id);
+    VLOG_DBG("\t goto-table: %u", instr->table_id);
   if (INSTR_SETMETADATA & instr->flags)
-    fprintf(stdout, "\t set-metadata: value=%x  mask=%x\n",
-            instr->metadata_value, instr->metadata_mask);
+    VLOG_DBG("\t set-metadata: value=%x  mask=%x",
+             instr->metadata_value, instr->metadata_mask);
   if (INSTR_WRITEACTIONS & instr->flags) {
-    fprintf(stdout, "\t write-actions:\n");
+    VLOG_DBG("\t write-actions:");
     for (i = 0; i < NUM_WRITE_ACTIONS; i++)
       print_action(i, instr->write_actions[i]);
   }
   if (INSTR_APPLYACTIONS & instr->flags) {
-    fprintf(stdout, "\t apply-actions:\n");
+    VLOG_DBG("\t apply-actions:");
     for (i = 0; i < NUM_APPLY_ACTIONS; i++)
       print_action(i, instr->apply_actions[i]);
   }
   if (INSTR_CLEARACTIONS & instr->flags)
-    fprintf(stdout, "\t clear-actions\n");
+    VLOG_DBG("\t clear-actions");
 }
 
 action_encoding_t make_output_action(port_t typ, uint8_t port) {
@@ -463,7 +467,7 @@ instr_encoding_t make_goto_instr(uint8_t table) {
 
 void init_tcam_cfg(tcam_cfg_t *cfg, int dev, const bs_info_t *bsi, int ntcam) {
   cfg->dev = dev;
-  fprintf(stdout, "Initializing cfg for tcam %d ...\n", ntcam);
+  VLOG_DBG("Initializing cfg for tcam %d ...\n", ntcam);
 
   struct tcam_info tci = bsi->tcams[ntcam];
   cfg->base_addr  = (uint32_t *)(uintptr_t)tci.base_addr;
