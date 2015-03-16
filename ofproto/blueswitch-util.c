@@ -278,6 +278,7 @@ bsw_extract_action(const struct bs_info *bsi,
                 return OFPERR_OFPBAC_TOO_MANY;
             }
             instr->write_actions[cursor->next_write_action++] = a;
+            instr->flags |= INSTR_WRITEACTIONS;
             VLOG_DBG("   instr[write] += OUTPUT %d", out->port);
         } else {
             if (cursor->next_apply_action >= NUM_APPLY_ACTIONS) {
@@ -286,6 +287,7 @@ bsw_extract_action(const struct bs_info *bsi,
                 return OFPERR_OFPBAC_TOO_MANY;
             }
             instr->apply_actions[cursor->next_apply_action++] = a;
+            instr->flags |= INSTR_APPLYACTIONS;
             VLOG_DBG("   instr[apply] += OUTPUT %d", out->port);
         }
     }
