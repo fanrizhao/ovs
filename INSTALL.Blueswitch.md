@@ -12,3 +12,9 @@ $ ovs-vsctl add-br br0 -- set bridge br0 datapath_type=blueswitch fail-mode=secu
 Use the ovs-ofctl command with protocol version 1.3 enabled:
 
 $ ovs-ofctl -OOpenFlow13 [cmd] [args ...]
+
+NOTE: Use the flow-mod 'priority' to specify the index of the rule entry in the switch table.
+
+Example:
+$ ovs-ofctl add-flow -OOpenFlow13 br0 "table=0, priority=0, ip, nw_dst=192.168.1.1, actions=output=2"
+
