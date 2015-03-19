@@ -391,21 +391,20 @@ static const char *port_type_str(uint32_t p) {
 }
 
 static void print_action(int i, action_encoding_t action) {
-  VLOG_DBG("\t\t action[%d]: ", i);
   switch (action.act_type) {
   case ACT_NONE:
-    VLOG_DBG("none");
+    VLOG_DBG("\t\t action[%d]: none", i);
     break;
   case ACT_OUTPUT:
-    VLOG_DBG("output port=%x port-type=%s (%x) (pad=%x)",
-             action.act_val.output.port_num,
+    VLOG_DBG("\t\t action[%d]: output port=%x port-type=%s (%x) (pad=%x)",
+             i, action.act_val.output.port_num,
              port_type_str(action.act_val.output.port_type), action.act_val.output.port_type,
              action.act_val.output.pad);
     break;
   default:
-    VLOG_DBG("unknown type %x (check alignment and/or endianness)", action.act_type);
+    VLOG_DBG("\t\t action[%d]: unknown type %x (check alignment and/or endianness)",
+             i, action.act_type);
   }
-  VLOG_DBG("\n");
 }
 
 void print_instruction(instr_encoding_t *instr) {

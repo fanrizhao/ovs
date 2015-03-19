@@ -18,6 +18,7 @@
 
 #include "blueswitch-util.h"
 
+#include "dynamic-string.h"
 #include "meta-flow.h"
 #include "openvswitch/vlog.h"
 
@@ -51,6 +52,13 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
                      const struct match *match,
                      struct bsw_tcam_key *key)
 {
+    {   struct ds ds;
+        ds_init(&ds);
+        match_format(match, &ds, 3);
+        VLOG_DBG("   processing match:  %s", ds_cstr(&ds));
+        ds_destroy(&ds);
+    }
+
     ovs_assert(BLUESWITCH_MAX_TCAM_KEYLEN >= tcam->key_size);
 
     bsw_tcam_key_init(key);
@@ -65,6 +73,15 @@ bsw_extract_tcam_key(const struct tcam_info *tcam,
         ovs_assert(key->n_valid_bytes + f->n_bytes <= 4 * tcam->key_size);
 
         VLOG_DBG("   extracting %d: %s for key", i, f->name);
+        {   union mf_value v, m;
+            mf_get(f, match, &v, &m);
+
+            struct ds ds;
+            ds_init(&ds);
+            mf_format(f, &v, &m, &ds);
+            VLOG_DBG("   field: %s", ds_cstr(&ds));
+            ds_destroy(&ds);
+        }
         /* TODO: XXX: Check endianness of all fields! */
 
         switch (id) {
