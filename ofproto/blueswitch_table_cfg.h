@@ -98,7 +98,7 @@ bs_info_t bsi_table = {
         },
       },
       .num_fields = 1,
-      .mf_fields  = { [0] = MFF_IPV4_SRC },
+      .mf_fields  = { [0] = MFF_IPV4_DST },
 #endif
     }
   }
