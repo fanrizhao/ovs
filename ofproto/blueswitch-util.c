@@ -644,7 +644,8 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
         break;
 
         default:
-            OVS_NOT_REACHED();
+            /* Unused command slot. */
+            break;
         }
     }
 
