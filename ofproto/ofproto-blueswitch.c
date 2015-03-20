@@ -472,6 +472,18 @@ process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
     struct match match;
     minimatch_expand(&rule->cr.match, &match);
 
+
+    /* In order to support rule delete, we need to store the table index at
+     * which this rule is eventually written at commit.  Since the commit can be
+     * done later, we will not know the index at this time. Hence we pass down
+     * the pointer to where we store the index (&brule->tcam_idx), so that the
+     * lower layer can update the index when it is known.
+
+     * Since the rule could be deleted before the commit, we will also need to
+     * track its pending update state, so that this can be cleared on delete.
+     * We store the index of the pending update state in &brule->cmd_queue_idx.
+     */
+
     enum ofperr ret;
     struct t_entry_update *ent_update;
 
@@ -488,14 +500,6 @@ process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
     if (ret) goto error;
     VLOG_DBG(" adding rule with instruction:");
     print_instruction(&ent_update->instr);
-
-    /* TODO: In order to support rule delete, we need to store the table index
-     * at which this rule is eventually written at commit.  Since the commit can
-     * be done later, we will not know the index at this time.
-
-     * Since the rule could be deleted before the commit, we will also need to
-     * track its pending update state, so that this can be cleared on delete.
-     */
 
     /* NOTE: In a true bundle-mode, the below code should not be executed here,
        but at the time of bundle commit.  Before the bundle commit, the updates
@@ -574,13 +578,24 @@ rule_delete(struct rule *rule)
     struct t_update *t_update    = s_state->table_updates[rule->table_id];
 
     /*   If we have any pending update in flight, convert it into a delete. */
-    if (brule->cmd_queue_idx > 0 && brule->txn_counter == s_state->txn_counter) {
-        VLOG_WARN("%s: deleting a pending update at idx %d",
-                  __func__, brule->cmd_queue_idx);
-        bsw_convert_update_to_delete(t_update, brule->cmd_queue_idx, &brule->tcam_idx);
+    if (brule->txn_counter == s_state->txn_counter) {
+        ovs_assert(brule->cmd_queue_idx > 0);
+
+        /* We might get two deletes in the same bundle.  The first one would
+         * have cleared our tcam_idx.
+         */
+        if (brule->tcam_idx >= 0) {
+            VLOG_WARN("%s: deleting a pending update at idx %d",
+                      __func__, brule->cmd_queue_idx);
+            bsw_convert_update_to_delete(t_update, brule->cmd_queue_idx, &brule->tcam_idx);
+        } else {
+            VLOG_WARN("%s: ignoring delete for rule without allocated tcam entry",
+                      __func__);
+        }
         ret = 0;
     } else {
         if (brule->tcam_idx >= 0) {
+            VLOG_DBG("%s: deleting rule from table %d", __func__, rule->table_id);
             /*
              * We have an entry in the tcam; create a new delete update for this
              * entry.
@@ -592,10 +607,21 @@ rule_delete(struct rule *rule)
             if (ret != 0) {
                 VLOG_WARN("%s: error allocating tcam ent update: %s",
                           __func__, ofperr_to_string(ret));
+            } else {
+                brule->tcam_idx = -1;
             }
+        } else {
+            VLOG_WARN("%s: ignoring delete for unknown tcam %d",
+                      __func__, brule->tcam_idx);
+            ret = 0;
         }
     }
+    if (!ret)
+        ret = bsw_commit_updates(bsi, s_state);
+
     ovs_mutex_unlock(&rule->mutex);
+
+    return ret;
 }
 
 static void

@@ -37,7 +37,7 @@ struct t_state {
 struct t_update {
     struct t_state *        t_working;
     uint32_t                cmd_queue_len;
-    uint32_t                next_cmd;
+    uint32_t                next_cmd;           /* currently unused */
     struct t_entry_update   cmds[];
 };
 
@@ -536,18 +536,12 @@ bsw_allocate_tcam_ent_update(struct t_update *table, enum t_entry_update_type t,
         return 0;
     }
 
-    /* To add a new entry to the TCAM, we need to search for an available slot. */
+    /* To add a new entry to the TCAM, we need to search for an empty slot. */
     for (idx = 0; idx < state->n_entries; idx++) {
         enum t_entry_state s = state->entries[idx];
-        u = &table->cmds[idx];
 
-        /* We can re-use an entry that is going to be deleted anyway, or an
-         * unused entry with no pending update.  The order is important below,
-         * since we allow deleting an empty entry.
-         */
-        if (u->type == TEM_DELETE)
-            break;
         if (s == TE_EMPTY) {
+            u = &table->cmds[idx];
             ovs_assert(u->type == 0);
             break;
         }
@@ -648,6 +642,9 @@ bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
             *cmd->tcam_idx_p = i;
         }
         break;
+
+        default:
+            OVS_NOT_REACHED();
         }
     }
 
@@ -707,12 +704,9 @@ bsw_commit_updates(struct bs_info *bsi, struct s_state *state)
     if (!ret)
         ret = bsw_commit(bsi);
 
-    /* Always reset update state, even on commit failure. */
     state->txn_counter++;
     for (int table_id = 0; table_id < bsi->num_tcams; table_id++) {
         struct t_update *u = state->table_updates[table_id];
-        u->next_cmd = 0;
-        memset(&u->cmds[0], 0, u->cmd_queue_len * sizeof(u->cmds[0]));
 
         /* Update the current table state */
         if (!ret) {
@@ -720,6 +714,10 @@ bsw_commit_updates(struct bs_info *bsi, struct s_state *state)
             for (int i = 0; i < s->n_entries; i++)
                 s->entries[i] = u->t_working->entries[i];
         }
+
+        /* Reset the command queue. */
+        u->next_cmd = 0;
+        memset(&u->cmds[0], 0, u->cmd_queue_len * sizeof(u->cmds[0]));
     }
 
     return ret;
