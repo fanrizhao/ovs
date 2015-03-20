@@ -16,5 +16,6 @@ $ ovs-ofctl -OOpenFlow13 [cmd] [args ...]
 NOTE: Use the flow-mod 'priority' to specify the index of the rule entry in the switch table.
 
 Example:
-$ ovs-ofctl add-flow -OOpenFlow13 br0 "table=0, priority=0, ip, nw_dst=192.168.1.1, actions=output=2"
+$ ovs-ofctl add-flow  -OOpenFlow13 br0 "table=0, priority=0, ip, nw_dst=192.168.1.1, actions=output=2"
+$ ovs-ofctl del-flows -OOpenFlow13 br0 "table=0, ip, nw_dst=192.168.1.1"
 
