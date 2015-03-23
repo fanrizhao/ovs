@@ -59,8 +59,6 @@ struct ofproto_blueswitch {
 
     /* OVS ports indexed by their netdev name.  */
     struct shash    ports_by_name;
-    /* TODO: FIXME: differentiate between dma and phys ports! */
-    ofp_port_t      next_port;
 
     /* top-level switch configuration */
     struct bs_info  *bs_info;
@@ -135,7 +133,6 @@ construct(struct ofproto *ofproto)
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
 
     shash_init(&bswitch->ports_by_name);
-    bswitch->next_port = 1;
 
     /* Read in switch configuration. */
     bswitch->bs_info = &bsi_table;
@@ -289,9 +286,15 @@ port_query_by_name(const struct ofproto *ofproto,
               ofproto->name, devname);
 
     struct ofproto_blueswitch *s = ofproto_blueswitch_cast(ofproto);
+
     struct ofproto_port *p =
         (struct ofproto_port *) shash_find_data(&s->ports_by_name, devname);
     if (!p) return 1;
+
+    /* If there is a requested port assignment, use it. */
+    struct simap_node *n = simap_find(&ofproto->ofp_requests, devname);
+    if (n)
+        p->ofp_port = n->data;
 
     port->name = xstrdup(p->name);
     port->type = xstrdup(p->type);
@@ -312,8 +315,7 @@ port_add(struct ofproto *ofproto, struct netdev *netdev)
 
     p->name     = xstrdup(netdev_get_name(netdev));
     p->type     = xstrdup(netdev_get_type(netdev));
-    p->ofp_port = (!strcmp(ofproto->name, p->name)
-                   ? OFPP_LOCAL : bswitch->next_port++);
+    p->ofp_port = 0;    /* FIXME: use a better default. */
 
     shash_add(&bswitch->ports_by_name, p->name, p);
     return 0;
@@ -620,8 +622,6 @@ rule_delete(struct rule *rule)
         ret = bsw_commit_updates(bsi, s_state);
 
     ovs_mutex_unlock(&rule->mutex);
-
-    return ret;
 }
 
 static void
