@@ -41,11 +41,6 @@ struct netdev_blueswitch {
     /* Protects all members below. */
     struct ovs_mutex mutex;
 
-    uint8_t etheraddr[ETH_ADDR_LEN];
-    struct in_addr in4;
-    struct in_addr netmask;
-    struct in6_addr in6;
-
     /* Switch config handles. */
     struct bs_info *bswitch;
 };
@@ -124,8 +119,8 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
 {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
-        VLOG_WARN("netdev_set_etheraddr(netdev(name=%s)): error creating socket! (%s)",
-                  netdev_get_name(netdev_), ovs_strerror(errno));
+        VLOG_WARN("%s(netdev(name=%s)): error creating socket! (%s)",
+                  __func__, netdev_get_name(netdev_), ovs_strerror(errno));
         return EOPNOTSUPP;
     }
 
@@ -135,11 +130,14 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
     ifr.ifr_addr.sa_family = AF_INET;
     strncpy(ifr.ifr_name, netdev_get_name(netdev_), IFNAMSIZ-1);
     if (0 != ioctl(fd, SIOCGIFHWADDR, &ifr)) {
-        VLOG_WARN("netdev_get_etheraddr(netdev(name=%s)): ioctl failed (%s)",
-                  netdev_get_name(netdev_), ovs_strerror(errno));
+        VLOG_WARN("%s(netdev(name=%s)): ioctl failed (%s)",
+                  __func__, netdev_get_name(netdev_), ovs_strerror(errno));
         return EOPNOTSUPP;
     }
     memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ADDR_LEN);
+    VLOG_DBG("%s(netdev(name=%s)): %.2X:%.2X:%.2X:%.2X:%.2X:%.2X",
+             __func__, netdev_get_name(netdev_),
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     return 0;
 }
 
@@ -154,6 +152,7 @@ static int
 netdev_blueswitch_get_stats(const struct netdev *netdev_ OVS_UNUSED,
                             struct netdev_stats *stats OVS_UNUSED)
 {
+    VLOG_WARN("netdev_get_stats(netdev(name=%s))", netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
