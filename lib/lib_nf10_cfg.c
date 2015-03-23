@@ -150,23 +150,23 @@ void write_buffer(int dev, uint32_t start_addr, uint32_t *buf, uint32_t buf_size
 /** TCAM interface **/
 
 /* measured in words */
-static inline uint32_t cmd_buf_size(tcam_cfg_t *cfg) {
+static inline uint32_t cmd_buf_size(const tcam_cfg_t *cfg) {
   return 2 * cfg->key_size + cfg->val_size;
 }
 
-uint32_t *key_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
+uint32_t *key_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   return &(cmd->buf[0]);
 }
 
-uint32_t *mask_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
+uint32_t *mask_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   return &(cmd->buf[cfg->key_size]);
 }
 
-uint32_t *val_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
+uint32_t *val_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   return &(cmd->buf[2 * cfg->key_size]);
 }
 
-int tcam_check_cfg(tcam_cfg_t *cfg) {
+int tcam_check_cfg(const tcam_cfg_t *cfg) {
   /* The address map layout is currently:
         base_addr   -> status       [32-bit]
         + set_ofs   -> set_regs     [cmd_size * 32-bit]
@@ -196,20 +196,20 @@ int tcam_check_cfg(tcam_cfg_t *cfg) {
   return 1;
 }
 
-tcam_cmd_buf_t *tcam_alloc_cmd_buf(tcam_cfg_t *cfg) {
+tcam_cmd_buf_t *tcam_alloc_cmd_buf(const tcam_cfg_t *cfg) {
   uint32_t buf_size = 4 * cmd_buf_size(cfg);
   tcam_cmd_buf_t *cb = (tcam_cmd_buf_t *)calloc(1, sizeof(tcam_cmd_buf_t) + buf_size);
   return cb;
 }
 
-void tcam_reset_cmd_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
+void tcam_reset_cmd_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   uint32_t buf_size = 4 * cmd_buf_size(cfg);
   memset(cmd, 0, sizeof(tcam_cmd_buf_t) + buf_size);
 }
 
 /*  This is the main TCAM interaction function that performs the
     reads/writes using the device interface. */
-static tcam_cmd_status_t do_tcam_cmd(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
+static tcam_cmd_status_t do_tcam_cmd(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   tcam_cmd_status_t st;
 
   /* Write the command buffer to the SetRegs. */
@@ -235,7 +235,7 @@ static tcam_cmd_status_t do_tcam_cmd(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd) {
   return st;
 }
 
-tcam_cmd_status_t tcam_get_primed(tcam_cfg_t *cfg, int *is_primed) {
+tcam_cmd_status_t tcam_get_primed(const tcam_cfg_t *cfg, int *is_primed) {
   tcam_cmd_status_t st;
   tcam_cmd_buf_t *c = tcam_alloc_cmd_buf(cfg);
 
@@ -249,7 +249,7 @@ tcam_cmd_status_t tcam_get_primed(tcam_cfg_t *cfg, int *is_primed) {
   return st;
 }
 
-tcam_cmd_status_t tcam_get_miss_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen) {
+tcam_cmd_status_t tcam_get_miss_val(const tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen) {
   ASSERT(val_buflen >= 4 * cfg->val_size);
 
   tcam_cmd_status_t st;
@@ -265,7 +265,7 @@ tcam_cmd_status_t tcam_get_miss_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t
   return st;
 }
 
-tcam_cmd_status_t tcam_get_nokey_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen) {
+tcam_cmd_status_t tcam_get_nokey_val(const tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen) {
   ASSERT(val_buflen >= 4 * cfg->val_size);
 
   tcam_cmd_status_t st;
@@ -281,7 +281,7 @@ tcam_cmd_status_t tcam_get_nokey_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_
   return st;
 }
 
-tcam_cmd_status_t tcam_get_entry(tcam_cfg_t *cfg, uint16_t idx,
+tcam_cmd_status_t tcam_get_entry(const tcam_cfg_t *cfg, uint16_t idx,
                                  int *is_valid,
                                  uint32_t *key_buf, uint32_t key_buflen  /* in bytes */,
                                  uint32_t *mask_buf, /* must be of size key_buflen */
@@ -312,7 +312,7 @@ tcam_cmd_status_t tcam_get_entry(tcam_cfg_t *cfg, uint16_t idx,
   return st;
 }
 
-tcam_cmd_status_t tcam_set_entry(tcam_cfg_t *cfg, uint16_t idx,
+tcam_cmd_status_t tcam_set_entry(const tcam_cfg_t *cfg, uint16_t idx,
                                  uint32_t *key_buf, uint32_t key_buflen  /* in bytes */,
                                  uint32_t *mask_buf, /* must be of size key_buflen */
                                  uint32_t *val_buf, uint32_t val_buflen  /* in bytes */) {
@@ -335,7 +335,7 @@ tcam_cmd_status_t tcam_set_entry(tcam_cfg_t *cfg, uint16_t idx,
   return st;
 }
 
-tcam_cmd_status_t tcam_del_entry(tcam_cfg_t *cfg, uint16_t idx) {
+tcam_cmd_status_t tcam_del_entry(const tcam_cfg_t *cfg, uint16_t idx) {
   tcam_cmd_status_t st;
   tcam_cmd_buf_t *c = tcam_alloc_cmd_buf(cfg);
   c->cmd = TCAM_CMD_ENT_DELETE;
@@ -345,7 +345,7 @@ tcam_cmd_status_t tcam_del_entry(tcam_cfg_t *cfg, uint16_t idx) {
   return st;
 }
 
-tcam_cmd_status_t tcam_end_txn(tcam_cfg_t *cfg) {
+tcam_cmd_status_t tcam_end_txn(const tcam_cfg_t *cfg) {
   tcam_cmd_status_t st;
   tcam_cmd_buf_t *c = tcam_alloc_cmd_buf(cfg);
   c->cmd = TCAM_CMD_END_TXN;
@@ -354,11 +354,11 @@ tcam_cmd_status_t tcam_end_txn(tcam_cfg_t *cfg) {
   return st;
 }
 
-tcam_cmd_status_t tcam_get_status(tcam_cfg_t *cfg) {
+tcam_cmd_status_t tcam_get_status(const tcam_cfg_t *cfg) {
   return read_register(cfg->dev, (uint32_t)(uintptr_t)(&cfg->base_addr[cfg->status_ofs]));
 }
 
-tcam_cmd_status_t tcam_clr_status(tcam_cfg_t *cfg) {
+tcam_cmd_status_t tcam_clr_status(const tcam_cfg_t *cfg) {
   tcam_cmd_status_t st;
   tcam_cmd_buf_t *c = tcam_alloc_cmd_buf(cfg);
   c->cmd = TCAM_CMD_CLR_STATUS;
@@ -438,7 +438,7 @@ action_encoding_t make_output_action(port_t typ, uint8_t port) {
   return r;
 }
 
-instr_encoding_t make_apply_action_instr(action_encoding_t act) {
+instr_encoding_t make_apply_action_instr(const action_encoding_t act) {
   instr_encoding_t i;
   memset(&i, 0, sizeof(i));
   i.flags = INSTR_APPLYACTIONS;
@@ -446,7 +446,7 @@ instr_encoding_t make_apply_action_instr(action_encoding_t act) {
   return i;
 }
 
-instr_encoding_t make_write_action_instr(action_encoding_t act) {
+instr_encoding_t make_write_action_instr(const action_encoding_t act) {
   instr_encoding_t i;
   memset(&i, 0, sizeof(i));
   i.flags = INSTR_WRITEACTIONS;
@@ -482,18 +482,19 @@ void init_tcam_cfg(tcam_cfg_t *cfg, int dev, const bs_info_t *bsi, int ntcam) {
   ASSERT(tcam_check_cfg(cfg));
 }
 
-int is_pipeline_activated(bs_info_t *bsi) {
+int is_pipeline_activated(const bs_info_t *bsi) {
   return (0 != read_register(bsi->dev, bsi->pipeline_base_addr));
 }
 
-void activate_pipeline(bs_info_t *bsi) {
+void activate_pipeline(const bs_info_t *bsi) {
   write_register(bsi->dev, bsi->pipeline_base_addr, 1);
 }
 
 /* Switch interface helpers */
 
 int open_switch(bs_info_t *bsi) {
-  bsi->dev = open_device();
+  if (bsi->dev < 0)
+    bsi->dev = open_device();
   return bsi->dev;
 }
 

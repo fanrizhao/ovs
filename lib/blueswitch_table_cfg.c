@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2014 Jong Hun Han
- * Copyright (c) 2014 SRI International
+ * Copyright (c) 2015 SRI International
  * All rights reserved.
  *
  * This software was developed by SRI International and the University of
@@ -29,8 +28,8 @@
  * SUCH DAMAGE.
  */
 
-#ifndef TABLE_CFG_H
-#define TABLE_CFG_H
+#include <config.h>
+#include "netdev-blueswitch.h"
 
 #ifdef SINGLE_TABLE
 /* Basic address map for the onetable switch, from
@@ -241,5 +240,3 @@ bs_info_t bsi_table = {
   }
 };
 #endif // MULTI_TABLE
-
-#endif // TABLE_CFG_H

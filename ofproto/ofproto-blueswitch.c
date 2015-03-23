@@ -39,12 +39,8 @@
 #include "dpif.h"
 #include "ofproto/ofproto-provider.h"
 
+#include "netdev-blueswitch.h"
 #include "blueswitch-util.h"
-
-#define BLUESWITCH_OVS_CONFIG
-#define SINGLE_TABLE
-#include "nf10_cfg.h"
-#include "blueswitch_table_cfg.h"
 
 #define DATAPATH_TYPE "blueswitch"
 #define PORT_TYPE     "netfpga"
@@ -61,7 +57,7 @@ struct ofproto_blueswitch {
     struct shash    ports_by_name;
 
     /* top-level switch configuration */
-    struct bs_info  *bs_info;
+    const struct bs_info  *bs_info;
 
     /* hardware switch state */
     struct s_state  s_state;
@@ -138,7 +134,7 @@ construct(struct ofproto *ofproto)
     bswitch->bs_info = &bsi_table;
 
     /* Initialize handle to switch driver. */
-    ret = open_switch(bswitch->bs_info);
+    ret = open_switch(&bsi_table);
     if (ret < 0) return ret;
 
     /* Configure number of switch ports. */
@@ -176,7 +172,7 @@ destruct(struct ofproto *ofproto)
 
     bsw_destroy_switch_state(&bswitch->s_state);
 
-    close_switch(bswitch->bs_info);
+    close_switch((struct bs_info *)bswitch->bs_info);
     bswitch->bs_info = NULL;
 
     shash_destroy(&bswitch->ports_by_name);
@@ -223,10 +219,10 @@ query_tables(struct ofproto *ofproto,
              struct ofputil_table_stats *stats OVS_UNUSED)
 {
     struct ofproto_blueswitch *ofp = ofproto_blueswitch_cast(ofproto);
-    struct bs_info *bsi = ofp->bs_info;
+    const struct bs_info *bsi      = ofp->bs_info;
     ovs_assert(ofproto->n_tables == bsi->num_tcams);
     for (int i = 0; i < ofproto->n_tables; i++) {
-        struct tcam_info *tci = &bsi->tcams[i];
+        const struct tcam_info *tci = &bsi->tcams[i];
         struct ofputil_table_features *f = &features[i];
         f->metadata_match = tci->features.metadata_match;
         f->metadata_write = tci->features.metadata_write;
@@ -459,7 +455,7 @@ process_add_or_modify_rule(struct rule *rule, enum t_entry_update_type u_type)
 {
     struct rule_blueswitch *brule      = rule_blueswitch_cast(rule);
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
-    struct bs_info *bsi                = bswitch->bs_info;
+    const struct bs_info *bsi          = bswitch->bs_info;
     struct s_state *s_state            = &bswitch->s_state;
 
     ovs_assert(rule->table_id < bsi->num_tcams);
@@ -570,7 +566,7 @@ rule_delete(struct rule *rule)
 
     struct rule_blueswitch *brule      = rule_blueswitch_cast(rule);
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule->ofproto);
-    struct bs_info *bsi                = bswitch->bs_info;
+    const struct bs_info *bsi          = bswitch->bs_info;
     struct s_state *s_state            = &bswitch->s_state;
 
     enum ofperr ret;

@@ -113,52 +113,52 @@ typedef struct tcam_cmd_buf {
 } tcam_cmd_buf_t;
 /* assert(sizeof(tcam_cmd_buf_t) == 4) */
 
-uint32_t *key_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
-uint32_t *mask_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
-uint32_t *val_of_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
+uint32_t *key_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
+uint32_t *mask_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
+uint32_t *val_of_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
 
 /* sanity check the config, in order to hopefully catch unexpected
    layout changes.  returns 1 on success, 0 on failure. */
-int tcam_check_cfg(tcam_cfg_t *cfg);
+int tcam_check_cfg(const tcam_cfg_t *cfg);
 
 /* utilities */
-tcam_cmd_buf_t *tcam_alloc_cmd_buf(tcam_cfg_t *cfg);
-void tcam_reset_cmd_buf(tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
+tcam_cmd_buf_t *tcam_alloc_cmd_buf(const tcam_cfg_t *cfg);
+void tcam_reset_cmd_buf(const tcam_cfg_t *cfg, tcam_cmd_buf_t *cmd);
 
 /* retrieve whether the tcam has been primed (i.e. an ended
    transaction is awaiting activation) */
-tcam_cmd_status_t tcam_get_primed(tcam_cfg_t *cfg, int *is_primed);
+tcam_cmd_status_t tcam_get_primed(const tcam_cfg_t *cfg, int *is_primed);
 
 /* retrieve the value to use when a lookup misses. */
-tcam_cmd_status_t tcam_get_miss_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
+tcam_cmd_status_t tcam_get_miss_val(const tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
 
 /* retrieve the default value to use when no key is present */
-tcam_cmd_status_t tcam_get_nokey_val(tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
+tcam_cmd_status_t tcam_get_nokey_val(const tcam_cfg_t *cfg, uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
 
 /* retrieve the tcam entry at a particular index */
-tcam_cmd_status_t tcam_get_entry(tcam_cfg_t *cfg, uint16_t idx,
+tcam_cmd_status_t tcam_get_entry(const tcam_cfg_t *cfg, uint16_t idx,
                                  int *is_valid,     /* whether there is a valid entry at that index */
                                  uint32_t *key_buf, uint32_t key_buflen /* in bytes */,
                                  uint32_t *mask_buf,/* must be of size key_buflen */
                                  uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
 
 /* set the tcam entry at a particular index */
-tcam_cmd_status_t tcam_set_entry(tcam_cfg_t *cfg, uint16_t idx,
+tcam_cmd_status_t tcam_set_entry(const tcam_cfg_t *cfg, uint16_t idx,
                                  uint32_t *key_buf, uint32_t key_buflen /* in bytes */,
                                  uint32_t *mask_buf,/* must be of size key_buflen */
                                  uint32_t *val_buf, uint32_t val_buflen /* in bytes */);
 
 /* remove a tcam entry at a particular index */
-tcam_cmd_status_t tcam_del_entry(tcam_cfg_t *cfg, uint16_t idx);
+tcam_cmd_status_t tcam_del_entry(const tcam_cfg_t *cfg, uint16_t idx);
 
 /* end current transaction */
-tcam_cmd_status_t tcam_end_txn(tcam_cfg_t *cfg);
+tcam_cmd_status_t tcam_end_txn(const tcam_cfg_t *cfg);
 
 /* get the status of the last tcam config command */
-tcam_cmd_status_t tcam_get_status(tcam_cfg_t *cfg);
+tcam_cmd_status_t tcam_get_status(const tcam_cfg_t *cfg);
 
 /* clear the tcam command status register */
-tcam_cmd_status_t tcam_clr_status(tcam_cfg_t *cfg);
+tcam_cmd_status_t tcam_clr_status(const tcam_cfg_t *cfg);
 
 /** Match Table / Instruction interface **/
 
@@ -220,8 +220,8 @@ typedef struct __attribute__ ((__packed__)) instr_encoding {
 
 /* utilities for common cases */
 
-instr_encoding_t make_apply_action_instr(action_encoding_t act);
-instr_encoding_t make_write_action_instr(action_encoding_t act);
+instr_encoding_t make_apply_action_instr(const action_encoding_t act);
+instr_encoding_t make_write_action_instr(const action_encoding_t act);
 instr_encoding_t make_goto_instr(uint8_t table);
 
 void print_instruction(instr_encoding_t *instr);
@@ -257,8 +257,8 @@ typedef struct bs_info {
 /* Initialize the config handle a particular tcam from the switch config. */
 void init_tcam_cfg(tcam_cfg_t *cfg, int dev, const bs_info_t *bsi, int ntcam);
 
-int is_pipeline_activated(bs_info_t *bsi);
-void activate_pipeline(bs_info_t *bsi);
+int is_pipeline_activated(const bs_info_t *bsi);
+void activate_pipeline(const bs_info_t *bsi);
 
 /* Switch interface helpers */
 

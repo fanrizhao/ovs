@@ -347,6 +347,8 @@ lib_libopenvswitch_la_SOURCES += \
 	lib/nf10_config.h \
 	lib/nf10_cfg.h \
 	lib/lib_nf10_cfg.c \
+	lib/blueswitch_table_cfg.h \
+	lib/blueswitch_table_cfg.c \
 	lib/netdev-blueswitch.h \
 	lib/netdev-blueswitch.c
 endif

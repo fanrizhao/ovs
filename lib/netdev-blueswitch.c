@@ -18,16 +18,11 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
-
-#include "netdev-blueswitch.h"
-
 #include <errno.h>
 
-#include "packets.h"
 #include "netdev-provider.h"
+#include "netdev-blueswitch.h"
 #include "openvswitch/vlog.h"
-
-#include "nf10_cfg.h"
 
 #define PORT_TYPE "netfpga"
 
@@ -42,7 +37,7 @@ struct netdev_blueswitch {
     struct ovs_mutex mutex;
 
     /* Switch config handles. */
-    struct bs_info *bswitch;
+    const struct bs_info *bswitch;
 };
 
 static void netdev_blueswitch_run(void);
@@ -84,13 +79,15 @@ netdev_blueswitch_construct(struct netdev *netdev_)
 {
     VLOG_WARN("netdev_construct(netdev(name=%s))", netdev_get_name(netdev_));
 
+    int ret = 0;
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
     ovs_mutex_init(&netdev->mutex);
 
-    /* TODO: open this somehow. */
-    netdev->bswitch = NULL;
+    if (bsi_table.dev < 0)
+        ret = open_switch(&bsi_table);
+    netdev->bswitch = &bsi_table;
 
-    return 0;
+    return ret;
 }
 
 static void

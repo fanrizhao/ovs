@@ -581,7 +581,7 @@ bsw_convert_update_to_delete(struct t_update *table, int cmd_idx, int *tcam_idx)
 }
 
 static enum ofperr
-bsw_update_table(struct bs_info *bsi, struct s_state *state, uint8_t table_id)
+bsw_update_table(const struct bs_info *bsi, struct s_state *state, uint8_t table_id)
 {
     ovs_assert(table_id < bsi->num_tcams);
 
@@ -661,7 +661,7 @@ error:
 }
 
 static enum ofperr
-bsw_commit(struct bs_info *bsi)
+bsw_commit(const struct bs_info *bsi)
 {
     tcam_cmd_status_t res;
 
@@ -693,7 +693,7 @@ bsw_commit(struct bs_info *bsi)
 }
 
 enum ofperr
-bsw_commit_updates(struct bs_info *bsi, struct s_state *state)
+bsw_commit_updates(const struct bs_info *bsi, struct s_state *state)
 {
     enum ofperr ret;
 
