@@ -38,6 +38,9 @@ struct netdev_blueswitch {
 
     /* Switch config handles. */
     const struct bs_info *bswitch;
+
+    /* assigned ofport */
+    int ofport;
 };
 
 static void netdev_blueswitch_run(void);
@@ -48,7 +51,13 @@ is_netdev_blueswitch_class(const struct netdev_class *netdev_class)
     return netdev_class->run == netdev_blueswitch_run;
 }
 
-static struct netdev_blueswitch *
+bool
+is_netdev_blueswitch(const struct netdev *netdev)
+{
+    return is_netdev_blueswitch_class(netdev_get_class(netdev));
+}
+
+struct netdev_blueswitch *
 netdev_blueswitch_cast(const struct netdev *netdev)
 {
     ovs_assert(is_netdev_blueswitch_class(netdev_get_class(netdev)));
@@ -83,6 +92,8 @@ netdev_blueswitch_construct(struct netdev *netdev_)
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
     ovs_mutex_init(&netdev->mutex);
 
+    netdev->ofport = -1;
+
     if (bsi_table.dev < 0)
         ret = open_switch(&bsi_table);
     netdev->bswitch = &bsi_table;
@@ -96,7 +107,6 @@ netdev_blueswitch_destruct(struct netdev *netdev_)
     VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
 
-    /* TODO: close/free this somehow */
     netdev->bswitch = NULL;
 
     ovs_mutex_destroy(&netdev->mutex);
@@ -146,11 +156,30 @@ netdev_blueswitch_get_mtu(const struct netdev *netdev_, int *mtup OVS_UNUSED)
 }
 
 static int
-netdev_blueswitch_get_stats(const struct netdev *netdev_ OVS_UNUSED,
-                            struct netdev_stats *stats OVS_UNUSED)
+netdev_blueswitch_get_stats(const struct netdev *netdev_,
+                            struct netdev_stats *stats)
 {
-    VLOG_WARN("netdev_get_stats(netdev(name=%s))", netdev_get_name(netdev_));
-    return EOPNOTSUPP;
+    struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
+    if (netdev->ofport < 0) {
+        VLOG_WARN("%s(%s): unassigned OF port",
+                  __func__, netdev_get_name(netdev_));
+        return EOPNOTSUPP;
+    }
+
+    struct port_stats ps;
+    if (!get_port_stats(netdev->bswitch, netdev->ofport, &ps)) {
+        VLOG_WARN("%s(%s): error retrieving stats for OF port %d",
+                  __func__, netdev_get_name(netdev_), netdev->ofport);
+        return EOPNOTSUPP;
+    }
+
+    memset(stats, 0, sizeof(*stats));
+    stats->rx_packets = ps.rx_pkts;
+    stats->rx_bytes   = ps.rx_bytes;
+    stats->tx_packets = ps.tx_pkts;
+    stats->tx_bytes   = ps.tx_bytes;
+
+    return 0;
 }
 
 static int
@@ -266,3 +295,11 @@ const struct netdev_class netdev_blueswitch_class =
     .rxq_wait               = NULL,
     .rxq_drain              = NULL,
 };
+
+void
+netdev_blueswitch_set_ofport(struct netdev_blueswitch *netdev, ofp_port_t ofp_port)
+{
+    VLOG_DBG("%s(%s): setting OF port to %d",
+             __func__, netdev_get_name(&netdev->up), ofp_port);
+    netdev->ofport = (int) ofp_port;
+}

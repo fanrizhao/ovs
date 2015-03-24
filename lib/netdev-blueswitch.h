@@ -19,3 +19,8 @@
 #define BLUESWITCH_OVS_CONFIG
 #include "nf10_cfg.h"
 #include "blueswitch_table_cfg.h"
+
+bool is_netdev_blueswitch(const struct netdev *netdev);
+struct netdev_blueswitch *netdev_blueswitch_cast(const struct netdev *netdev);
+
+void netdev_blueswitch_set_ofport(struct netdev_blueswitch *netdev, ofp_port_t ofp_port);
