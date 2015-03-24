@@ -86,7 +86,7 @@ static void netdev_blueswitch_dealloc(struct netdev *netdev_)
 static int
 netdev_blueswitch_construct(struct netdev *netdev_)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
 
     int ret = 0;
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
@@ -104,7 +104,7 @@ netdev_blueswitch_construct(struct netdev *netdev_)
 static void
 netdev_blueswitch_destruct(struct netdev *netdev_)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
 
     netdev->bswitch = NULL;
@@ -116,7 +116,7 @@ static int
 netdev_blueswitch_set_etheraddr(struct netdev *netdev_,
                                 const uint8_t mac[ETH_ADDR_LEN] OVS_UNUSED)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -151,7 +151,7 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
 static int
 netdev_blueswitch_get_mtu(const struct netdev *netdev_, int *mtup OVS_UNUSED)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -189,7 +189,7 @@ netdev_blueswitch_get_features(const struct netdev *netdev_,
                                enum netdev_features *supported OVS_UNUSED,
                                uint32_t *peer OVS_UNUSED)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -198,7 +198,7 @@ netdev_blueswitch_get_in4(const struct netdev *netdev_,
                           struct in_addr *in4 OVS_UNUSED,
                           struct in_addr *netmask OVS_UNUSED)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -207,7 +207,7 @@ netdev_blueswitch_set_in4(struct netdev *netdev_,
                           struct in_addr addr OVS_UNUSED,
                           struct in_addr mask OVS_UNUSED)
 {
-    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
+    VLOG_DBG("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -216,8 +216,8 @@ static int
 update_flags(struct netdev *netdev, enum netdev_flags off,
              enum netdev_flags on, enum netdev_flags *old_flags)
 {
-    VLOG_WARN("%s(%s): off=%d, on=%d",
-              __func__, netdev_get_name(netdev), off, on);
+    VLOG_DBG("%s(%s): off=%d, on=%d",
+             __func__, netdev_get_name(netdev), off, on);
     *old_flags = NETDEV_UP;
     return 0;
 }
