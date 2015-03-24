@@ -80,8 +80,8 @@ init(const struct shash *iface_hints)
     SHASH_FOR_EACH(node, iface_hints) {
         const struct iface_hint *hint = node->data;
 
-        VLOG_WARN("iface_hint:  name:%s  type:%s  port:%d",
-                  hint->br_name, hint->br_type, hint->ofp_port);
+        VLOG_DBG("iface_hint:  name:%s  type:%s  port:%d",
+                 hint->br_name, hint->br_type, hint->ofp_port);
     }
 }
 
@@ -101,15 +101,15 @@ enumerate_names(const char *type OVS_UNUSED, struct sset *names OVS_UNUSED)
 static int
 del(const char *type, const char *name)
 {
-    VLOG_WARN("del(type=%s,name=%s)", type, name);
+    VLOG_DBG("%s(type=%s,name=%s)", __func__, type, name);
     return -1;
 }
 
 static const char *
 port_open_type(const char *datapath_type, const char *port_type)
 {
-    VLOG_WARN("port_open_type(datapath_type=%s,port_type=%s)",
-              datapath_type, port_type);
+    VLOG_DBG("%s(datapath_type=%s,port_type=%s)",
+             __func__, datapath_type, port_type);
     return PORT_TYPE;
 }
 
@@ -302,8 +302,8 @@ port_query_by_name(const struct ofproto *ofproto,
 static int
 port_add(struct ofproto *ofproto, struct netdev *netdev)
 {
-    VLOG_WARN("port_add: adding netdev %s of type %s",
-              netdev_get_name(netdev), netdev_get_type(netdev));
+    VLOG_DBG("%s(%s): adding netdev %s of type %s", __func__, ofproto->name,
+             netdev_get_name(netdev), netdev_get_type(netdev));
 
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
     struct ofproto_port *p = (struct ofproto_port *)xmalloc(sizeof *p);
@@ -320,7 +320,7 @@ port_add(struct ofproto *ofproto, struct netdev *netdev)
 static int
 port_del(struct ofproto *ofproto, ofp_port_t ofp_port)
 {
-    VLOG_WARN("port_del: deleting port %d", ofp_port);
+    VLOG_DBG("%s(%s): deleting port %d", __func__, ofproto->name, ofp_port);
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
 
     struct shash_node *node, *next;
@@ -340,9 +340,9 @@ static int
 port_get_stats(const struct ofport *port,
                    struct netdev_stats *stats OVS_UNUSED)
 {
-    VLOG_WARN("port_get_stats: name:%s type:%s",
-              netdev_get_name(port->netdev),
-              netdev_get_type(port->netdev));
+    VLOG_DBG("%s(%s): name:%s type:%s", __func__, port->ofproto->name,
+             netdev_get_name(port->netdev),
+             netdev_get_type(port->netdev));
     return 0;
 }
 
@@ -369,7 +369,7 @@ port_dump_next(const struct ofproto *ofproto, void *state_,
 {
     struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(ofproto);
     struct port_dump_state *state = state_;
-    VLOG_WARN("port_dump_next(%d)", state->count);
+    VLOG_DBG("%s(%d)", __func__, state->count);
     if (state->next == NULL) {
         return EOF;
     }
@@ -395,12 +395,12 @@ port_dump_done(const struct ofproto *ofproto OVS_UNUSED, void *state_)
 /* OpenFlow Rule Functions */
 
 static enum ofperr
-rule_choose_table(const struct ofproto *ofproto OVS_UNUSED,
+rule_choose_table(const struct ofproto *ofproto,
                   const struct match *match OVS_UNUSED,
                   uint8_t *table_idp OVS_UNUSED)
 {
-    VLOG_WARN("rule_choose_table: match=%s",
-              match_to_string(match, OFP_DEFAULT_PRIORITY));
+    VLOG_DBG("%s(%s): match=%s", __func__, ofproto->name,
+             match_to_string(match, OFP_DEFAULT_PRIORITY));
 
     /* TODO: Convert the features supported by the tcams into the match form.
        Then compare that match to the one provided in order to select the table.
