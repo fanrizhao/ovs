@@ -77,7 +77,7 @@ static void netdev_blueswitch_dealloc(struct netdev *netdev_)
 static int
 netdev_blueswitch_construct(struct netdev *netdev_)
 {
-    VLOG_WARN("netdev_construct(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
 
     int ret = 0;
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
@@ -93,7 +93,7 @@ netdev_blueswitch_construct(struct netdev *netdev_)
 static void
 netdev_blueswitch_destruct(struct netdev *netdev_)
 {
-    VLOG_WARN("netdev_destruct(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     struct netdev_blueswitch *netdev = netdev_blueswitch_cast(netdev_);
 
     /* TODO: close/free this somehow */
@@ -106,7 +106,7 @@ static int
 netdev_blueswitch_set_etheraddr(struct netdev *netdev_,
                                 const uint8_t mac[ETH_ADDR_LEN] OVS_UNUSED)
 {
-    VLOG_WARN("netdev_set_etheraddr(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -116,7 +116,7 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
 {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
-        VLOG_WARN("%s(netdev(name=%s)): error creating socket! (%s)",
+        VLOG_WARN("%s(%s): error creating socket! (%s)",
                   __func__, netdev_get_name(netdev_), ovs_strerror(errno));
         return EOPNOTSUPP;
     }
@@ -127,12 +127,12 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
     ifr.ifr_addr.sa_family = AF_INET;
     strncpy(ifr.ifr_name, netdev_get_name(netdev_), IFNAMSIZ-1);
     if (0 != ioctl(fd, SIOCGIFHWADDR, &ifr)) {
-        VLOG_WARN("%s(netdev(name=%s)): ioctl failed (%s)",
+        VLOG_WARN("%s(%s): ioctl failed (%s)",
                   __func__, netdev_get_name(netdev_), ovs_strerror(errno));
         return EOPNOTSUPP;
     }
     memcpy(mac, ifr.ifr_hwaddr.sa_data, ETH_ADDR_LEN);
-    VLOG_DBG("%s(netdev(name=%s)): %.2X:%.2X:%.2X:%.2X:%.2X:%.2X",
+    VLOG_DBG("%s(%s): %.2X:%.2X:%.2X:%.2X:%.2X:%.2X",
              __func__, netdev_get_name(netdev_),
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     return 0;
@@ -141,7 +141,7 @@ netdev_blueswitch_get_etheraddr(const struct netdev *netdev_,
 static int
 netdev_blueswitch_get_mtu(const struct netdev *netdev_, int *mtup OVS_UNUSED)
 {
-    VLOG_WARN("netdev_get_mtu(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -160,8 +160,7 @@ netdev_blueswitch_get_features(const struct netdev *netdev_,
                                enum netdev_features *supported OVS_UNUSED,
                                uint32_t *peer OVS_UNUSED)
 {
-    VLOG_WARN("netdev_get_features(netdev(name=%s))",
-              netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -170,7 +169,7 @@ netdev_blueswitch_get_in4(const struct netdev *netdev_,
                           struct in_addr *in4 OVS_UNUSED,
                           struct in_addr *netmask OVS_UNUSED)
 {
-    VLOG_WARN("netdev_get_in4(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -179,7 +178,7 @@ netdev_blueswitch_set_in4(struct netdev *netdev_,
                           struct in_addr addr OVS_UNUSED,
                           struct in_addr mask OVS_UNUSED)
 {
-    VLOG_WARN("netdev_set_in4(netdev(name=%s))", netdev_get_name(netdev_));
+    VLOG_WARN("%s(%s)", __func__, netdev_get_name(netdev_));
     return EOPNOTSUPP;
 }
 
@@ -188,8 +187,8 @@ static int
 update_flags(struct netdev *netdev, enum netdev_flags off,
              enum netdev_flags on, enum netdev_flags *old_flags)
 {
-    VLOG_WARN("update_flags(netdev=%s): off=%d, on=%d",
-              netdev_get_name(netdev), off, on);
+    VLOG_WARN("%s(%s): off=%d, on=%d",
+              __func__, netdev_get_name(netdev), off, on);
     *old_flags = NETDEV_UP;
     return 0;
 }
