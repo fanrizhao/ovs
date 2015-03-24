@@ -502,3 +502,27 @@ void close_switch(bs_info_t *bsi) {
   if (bsi->dev >= 0)
     close(bsi->dev);
 }
+
+/* Stats interface */
+
+int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats) {
+    uint32_t stats_addr;
+
+    if (bsi->dev < 0 || port >= bsi->num_ports)
+        return -1;
+
+    /* Input stats */
+    stats_addr = bsi->stats_base_addr + 8 * port;
+    stats->rx_pkts  = read_register(bsi->dev, stats_addr);
+    stats->rx_bytes = read_register(bsi->dev, stats_addr + 4);
+
+    /* Output stats */
+    stats_addr = (bsi->stats_base_addr
+                  + 8 * bsi->num_ports  /* port input stats */
+                  + 8                   /* input arbiter stats */
+                  + 8 * port);
+    stats->tx_pkts  = read_register(bsi->dev, stats_addr);
+    stats->rx_bytes = read_register(bsi->dev, stats_addr + 4);
+
+    return 0;
+}

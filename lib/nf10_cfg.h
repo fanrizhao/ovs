@@ -265,4 +265,15 @@ void activate_pipeline(const bs_info_t *bsi);
 int open_switch(bs_info_t *bsi);
 void close_switch(bs_info_t *bsi);
 
+/* Stats interface */
+
+struct port_stats {
+  uint32_t rx_bytes;
+  uint32_t rx_pkts;
+  uint32_t tx_bytes;
+  uint32_t tx_pkts;
+};
+
+int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats);
+
 #endif /* NF10_CFG_H */
