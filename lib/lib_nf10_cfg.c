@@ -508,8 +508,14 @@ void close_switch(bs_info_t *bsi) {
 int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats) {
     uint32_t stats_addr;
 
-    if (bsi->dev < 0 || port >= bsi->num_ports)
+    if (bsi->dev < 0) {
+        VLOG_DBG("%s(%d): uninitialized switch handle", __func__, port);
         return -1;
+    }
+    if (port >= bsi->num_ports) {
+        VLOG_DBG("%s(%d): port out of range", __func__, port);
+        return -1;
+    }
 
     /* Input stats */
     stats_addr = bsi->stats_base_addr + 8 * port;

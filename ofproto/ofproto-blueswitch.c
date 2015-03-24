@@ -257,9 +257,21 @@ port_alloc(void)
     return p;
 }
 
-static int
-port_construct(struct ofport *ofport OVS_UNUSED)
+static void
+set_netdev_blueswitch_port(struct netdev *netdev, ofp_port_t ofp_port)
 {
+    if (netdev && is_netdev_blueswitch(netdev)) {
+        struct netdev_blueswitch *nb = netdev_blueswitch_cast(netdev);
+        netdev_blueswitch_set_ofport(nb, ofp_port);
+    }
+}
+
+static int
+port_construct(struct ofport *ofport)
+{
+    VLOG_DBG("%s(%s, devname=%s)",
+             __func__, ofport->ofproto->name, netdev_get_name(ofport->netdev));
+    set_netdev_blueswitch_port(ofport->netdev, ofport->ofp_port);
     return 0;
 }
 
@@ -274,12 +286,28 @@ port_dealloc(struct ofport *ofport)
     free(ofport);
 }
 
+static void
+port_modified(struct ofport *ofport)
+{
+    VLOG_DBG("%s(%s, devname=%s)",
+             __func__, ofport->ofproto->name, netdev_get_name(ofport->netdev));
+    set_netdev_blueswitch_port(ofport->netdev, ofport->ofp_port);
+}
+
+static void
+port_reconfigured(struct ofport *ofport,
+                  enum ofputil_port_config old_config OVS_UNUSED)
+{
+    VLOG_DBG("%s(%s, devname=%s)",
+             __func__, ofport->ofproto->name, netdev_get_name(ofport->netdev));
+    set_netdev_blueswitch_port(ofport->netdev, ofport->ofp_port);
+}
+
 static int
 port_query_by_name(const struct ofproto *ofproto,
                    const char *devname, struct ofproto_port *port)
 {
-    VLOG_WARN("port_query_by_name(ofp=%s, devname=%s)",
-              ofproto->name, devname);
+    VLOG_DBG("%s(%s, devname=%s)", __func__, ofproto->name, devname);
 
     struct ofproto_blueswitch *s = ofproto_blueswitch_cast(ofproto);
 
@@ -684,8 +712,8 @@ const struct ofproto_class ofproto_blueswitch_class = {
     .port_construct     = port_construct,
     .port_destruct      = port_destruct,
     .port_dealloc       = port_dealloc,
-    .port_modified      = NULL,
-    .port_reconfigured  = NULL,
+    .port_modified      = port_modified,
+    .port_reconfigured  = port_reconfigured,
     .port_query_by_name = port_query_by_name,
     .port_add           = port_add,
     .port_del           = port_del,

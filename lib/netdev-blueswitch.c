@@ -167,7 +167,7 @@ netdev_blueswitch_get_stats(const struct netdev *netdev_,
     }
 
     struct port_stats ps;
-    if (!get_port_stats(netdev->bswitch, netdev->ofport, &ps)) {
+    if (get_port_stats(netdev->bswitch, netdev->ofport, &ps)) {
         VLOG_WARN("%s(%s): error retrieving stats for OF port %d",
                   __func__, netdev_get_name(netdev_), netdev->ofport);
         return EOPNOTSUPP;
