@@ -173,6 +173,10 @@ netdev_blueswitch_get_stats(const struct netdev *netdev_,
         return EOPNOTSUPP;
     }
 
+    VLOG_DBG("%s(%s): in: %u pkts, %u bytes  out: %u pkts, %u bytes",
+             __func__, netdev_get_name(netdev_),
+             ps.rx_pkts, ps.rx_bytes, ps.tx_pkts, ps.tx_bytes);
+
     memset(stats, 0, sizeof(*stats));
     stats->rx_packets = ps.rx_pkts;
     stats->rx_bytes   = ps.rx_bytes;

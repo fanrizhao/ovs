@@ -528,7 +528,7 @@ int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats
                   + 8                   /* input arbiter stats */
                   + 8 * port);
     stats->tx_pkts  = read_register(bsi->dev, stats_addr);
-    stats->rx_bytes = read_register(bsi->dev, stats_addr + 4);
+    stats->tx_bytes = read_register(bsi->dev, stats_addr + 4);
 
     return 0;
 }

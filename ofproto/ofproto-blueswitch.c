@@ -371,7 +371,7 @@ port_get_stats(const struct ofport *port,
     VLOG_DBG("%s(%s): name:%s type:%s", __func__, port->ofproto->name,
              netdev_get_name(port->netdev),
              netdev_get_type(port->netdev));
-    return 0;
+    return netdev_get_stats(port->netdev, stats);
 }
 
 /* Port iteration functions */
