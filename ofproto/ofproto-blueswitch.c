@@ -446,8 +446,6 @@ struct rule_blueswitch {
     int cmd_queue_idx;      /* index into cmd queue for any pending update */
     int tcam_idx;           /* index into tcam at which this rule is stored */
 
-    struct ovs_mutex stats_mutex;
-    struct dpif_flow_stats stats OVS_GUARDED;
 };
 
 static struct rule_blueswitch *rule_blueswitch_cast(const struct rule *rule)
@@ -456,24 +454,19 @@ static struct rule_blueswitch *rule_blueswitch_cast(const struct rule *rule)
 }
 
 static struct rule *
-rule_alloc(void) {
+rule_alloc(void)
+{
     struct rule_blueswitch *rule = xmalloc(sizeof *rule);
     return &rule->up;
 }
 
 static enum ofperr
 rule_construct(struct rule *rule_)
-    OVS_NO_THREAD_SAFETY_ANALYSIS
 {
     struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
     rule->txn_counter = 0;
     rule->cmd_queue_idx = -1;
     rule->tcam_idx = -1;
-
-    ovs_mutex_init_adaptive(&rule->stats_mutex);
-    rule->stats.n_packets = 0;
-    rule->stats.n_bytes = 0;
-    rule->stats.used = rule->up.modified;
 
     return 0;
 }
@@ -647,10 +640,8 @@ rule_delete(struct rule *rule)
 }
 
 static void
-rule_destruct(struct rule *rule_)
+rule_destruct(struct rule *rule_ OVS_UNUSED)
 {
-    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
-    ovs_mutex_destroy(&rule->stats_mutex);
 }
 
 static void
@@ -665,12 +656,28 @@ rule_get_stats(struct rule *rule_, uint64_t *packet_count,
                uint64_t *byte_count, long long int *used)
     OVS_EXCLUDED(ofproto_mutex)
 {
-    struct rule_blueswitch *rule = rule_blueswitch_cast(rule_);
-    ovs_mutex_lock(&rule->stats_mutex);
-    *packet_count = rule->stats.n_packets;
-    *byte_count = rule->stats.n_bytes;
-    *used = rule->stats.used;
-    ovs_mutex_unlock(&rule->stats_mutex);
+    struct rule_blueswitch *rule       = rule_blueswitch_cast(rule_);
+    struct ofproto_blueswitch *bswitch = ofproto_blueswitch_cast(rule_->ofproto);
+    const struct bs_info *bsi          = bswitch->bs_info;
+
+    VLOG_DBG("%s(table=%d): ent=%d", __func__, rule_->table_id, rule->tcam_idx);
+
+    ovs_assert(rule_->table_id < bsi->num_tcams);
+
+    /* We don't currently track pkts/bytes per rule-entry in the switch. */
+    *packet_count = 0;
+    *byte_count   = 0;
+
+    if (rule->tcam_idx < 0) {
+        *used = 0;
+    } else {
+        struct tcam_ent_stats stats;
+        if (get_rule_stats(bsi, rule_->table_id, rule->tcam_idx, &stats) < 0) {
+            *used = 0;
+        } else {
+            *used = stats.used;
+        }
+    }
 }
 
 const struct ofproto_class ofproto_blueswitch_class = {

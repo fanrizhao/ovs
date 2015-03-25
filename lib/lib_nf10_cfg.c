@@ -509,11 +509,11 @@ int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats
     uint32_t stats_addr;
 
     if (bsi->dev < 0) {
-        VLOG_DBG("%s(%d): uninitialized switch handle", __func__, port);
+        VLOG_WARN("%s(%d): uninitialized switch handle", __func__, port);
         return -1;
     }
     if (port >= bsi->num_ports) {
-        VLOG_DBG("%s(%d): port out of range", __func__, port);
+        VLOG_WARN("%s(%d): port out of range (max=%u)", __func__, port, bsi->num_ports);
         return -1;
     }
 
@@ -529,6 +529,45 @@ int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats
                   + 8 * port);
     stats->tx_pkts  = read_register(bsi->dev, stats_addr);
     stats->tx_bytes = read_register(bsi->dev, stats_addr + 4);
+
+    return 0;
+}
+
+int get_rule_stats(const bs_info_t *bsi, int tcam, int idx, struct tcam_ent_stats *stats) {
+    int i;
+
+    if (bsi->dev < 0) {
+        VLOG_WARN("%s(%d:%d): uninitialized switch handle", __func__, tcam, idx);
+        return -1;
+    }
+    if (tcam >= bsi->num_tcams) {
+        VLOG_WARN("%s(%d:%d): tcam out of range (max=%u)",
+                  __func__, tcam, idx, bsi->num_tcams);
+        return -1;
+    }
+
+    struct tcam_info tci = bsi->tcams[tcam];
+    if (idx < 0 || idx >= tci.num_entries) {
+        VLOG_WARN("%s(%d:%d): ent idx out of range (max=%u)",
+                  __func__, tcam, idx, tci.num_entries);
+        return -1;
+    }
+
+    uint32_t stats_addr;
+    stats_addr = (bsi->pipeline_base_addr + 4       /* Skip over pipeline activation register */
+                  + (4 + 4 + 4) * bsi->num_ports    /* Per-port input parser stats */
+                  + (4 + 4 + 4) * bsi->num_ports    /* Per-port output marshaller stats */
+                  + (5 * 4) * bsi->num_tcams        /* Per-Match table stats */
+                  + (2 * 4));                       /* Output table stats */
+
+    for (i = 0; i < tcam; i++) {
+        struct tcam_info t = bsi->tcams[i];
+        stats_addr += (4                            /* TCAM miss entry */
+                       + 4 * t.num_entries);        /* Per-entry hit statistics */
+    }
+
+    stats_addr += 4 * idx;                          /* Skip over previous entries in TCAM */
+    stats->used = read_register(bsi->dev, stats_addr);
 
     return 0;
 }

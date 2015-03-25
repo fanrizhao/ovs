@@ -276,4 +276,10 @@ struct port_stats {
 
 int get_port_stats(const bs_info_t *bsi, uint32_t port, struct port_stats *stats);
 
+struct tcam_ent_stats {
+  uint32_t used;
+};
+
+int get_rule_stats(const bs_info_t *bsi, int tcam, int idx, struct tcam_ent_stats *stats);
+
 #endif /* NF10_CFG_H */
