@@ -569,9 +569,7 @@ rule_delete(struct rule *rule)
     OVS_REQUIRES(ofproto_mutex)
 {
     ovs_mutex_lock(&rule->mutex);
-    /* TODO:
-
-       We need to handle the following situations.
+    /* We need to handle the following situations.
 
        1.  The rule being deleted was not yet committed to the switch.  In this
        case, we might just need to update the set of pending updates.
