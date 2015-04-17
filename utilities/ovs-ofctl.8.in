@@ -1153,7 +1153,7 @@ least-significant.  \fBxreg1\fR similarly overlays \fBreg2\fR and
 \fBreg3\fR, and so on.
 .IP
 These fields were added in Open vSwitch 2.3 to conform with the
-OpenFlow 1.5 (draft) specification.  OpenFlow 1.5 calls these fields
+OpenFlow 1.5 specification.  OpenFlow 1.5 calls these fields
 just the ``packet registers,'' but Open vSwitch already had 32-bit
 registers by that name, which is why Open vSwitch refers to the
 standard registers as ``extended registers''.
@@ -1174,7 +1174,7 @@ output group in the OpenFlow action set), then the value will be
 \fBUNSET\fR.
 .IP
 This field was introduced in Open vSwitch 2.4 to conform with the
-OpenFlow 1.5 (draft) specification.
+OpenFlow 1.5 specification.
 .
 .IP \fBconj_id=\fIvalue\fR
 Matches the given 32-bit \fIvalue\fR against the conjunction ID.  This
@@ -1485,7 +1485,7 @@ significant 16 bits of register 0 into the VLAN TCI field.
 .IP
 In OpenFlow 1.0 through 1.4, \fBmove\fR ordinarily uses an Open
 vSwitch extension to OpenFlow.  In OpenFlow 1.5, \fBmove\fR uses the
-OpenFlow 1.5 (draft) standard \fBcopy_field\fR action.  The ONF has
+OpenFlow 1.5 standard \fBcopy_field\fR action.  The ONF has
 also made \fBcopy_field\fR available as an extension to OpenFlow 1.3.
 Open vSwitch 2.4 and later understands this extension and uses it if a
 controller uses it, but for backward compatibility with older versions
@@ -2248,6 +2248,40 @@ remove the in the group whose \fBbucket_id\fR is \fIid\fR.
 It is an error if there is no bucket persent group in whose \fBbucket_id\fR is
 \fIid\fR.
 
+.IP \fBselection_method\fR=\fImethod\fR
+The selection method used to select a bucket for a select group.
+This is a string of 1 to 15 bytes in length known to lower layers.
+This field is optional for \fBadd\-group\fR, \fBadd\-groups\fR and
+\fBmod\-group\fR commands on groups of type \fBselect\fR. Prohibited
+otherwise. The default value is the empty string.
+.IP
+This option will use a Netronome OpenFlow extension which is only supported
+when using Open vSwitch 2.4 and later with OpenFlow 1.5 and later.
+
+.IP \fBselection_method_param\fR=\fIparam\fR
+64-bit integer parameter to the selection method selected by the
+\fBselection_method\fR field.  The parameter's use is defined by the
+lower-layer that implements the \fBselection_method\fR.  It is optional if
+the \fBselection_method\fR field is specified as a non-empty string.
+Prohibited otherwise. The default value is zero.
+.IP
+This option will use a Netronome OpenFlow extension which is only supported
+when using Open vSwitch 2.4 and later with OpenFlow 1.5 and later.
+
+.IP \fBfields\fR=\fIparam\fR
+The field parameters to selection method selected by the
+\fBselection_method\fR field.  The syntax is described in \fBFlow Syntax\fR
+with the additional restrictions that if a value is provided it is
+treated as a wildcard mask and wildcard masks following a slash are
+prohibited. The pre-requisites of fields must be provided by any flows that
+output to the group. The use of the fields is defined by the lower-layer
+that implements the \fBselection_method\fR.  They are optional if the
+\fBselection_method\fR field is specified as a non-empty string.
+Prohibited otherwise. The default is no fields.
+.IP
+This option will use a Netronome OpenFlow extension which is only supported
+when using Open vSwitch 2.4 and later with OpenFlow 1.5 and later.
+
 .IP \fBbucket\fR=\fIbucket_parameters\fR
 The \fBadd-group\fR, \fBadd-groups\fR and \fBmod-group\fR commands
 require at least one bucket field. Bucket fields must appear after
@@ -2269,7 +2303,7 @@ The 32-bit integer group id of the bucket.  Values greater than
 0xffffff00 are reserved.
 .
 This field was added in Open vSwitch 2.4 to conform with the OpenFlow
-1.5 (draft) specification. It is not supported when earlier versions
+1.5 specification. It is not supported when earlier versions
 of OpenFlow are used.  Open vSwitch will automatically allocate bucket
 ids when they are not specified.
 .IP \fBactions=\fR[\fIaction\fR][\fB,\fIaction\fR...]\fR

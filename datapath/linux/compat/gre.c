@@ -250,6 +250,7 @@ int gre_cisco_register(struct gre_cisco_protocol *newp)
 	return (cmpxchg((struct gre_cisco_protocol **)&gre_cisco_proto, NULL, newp) == NULL) ?
 		0 : -EBUSY;
 }
+EXPORT_SYMBOL_GPL(gre_cisco_register);
 
 int gre_cisco_unregister(struct gre_cisco_protocol *proto)
 {
@@ -265,12 +266,13 @@ int gre_cisco_unregister(struct gre_cisco_protocol *proto)
 	ret = gre_del_protocol(&ipgre_protocol, GREPROTO_CISCO);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(gre_cisco_unregister);
 
 #endif /* !HAVE_GRE_CISCO_REGISTER */
 
-#ifndef USE_KERNEL_TUNNEL_API
-
 /* GRE TX side. */
+static void gre_nop_fix(struct sk_buff *skb) { }
+
 static void gre_csum_fix(struct sk_buff *skb)
 {
 	struct gre_base_hdr *greh;
@@ -287,16 +289,17 @@ static void gre_csum_fix(struct sk_buff *skb)
 
 struct sk_buff *gre_handle_offloads(struct sk_buff *skb, bool gre_csum)
 {
+	int type = gre_csum ? SKB_GSO_GRE_CSUM : SKB_GSO_GRE;
 	gso_fix_segment_t fix_segment;
 
 	if (gre_csum)
 		fix_segment = gre_csum_fix;
 	else
-		fix_segment = NULL;
+		fix_segment = gre_nop_fix;
 
-	skb_reset_inner_headers(skb);
-	return ovs_iptunnel_handle_offloads(skb, gre_csum, fix_segment);
+	return ovs_iptunnel_handle_offloads(skb, gre_csum, type, fix_segment);
 }
+EXPORT_SYMBOL_GPL(gre_handle_offloads);
 
 static bool is_gre_gso(struct sk_buff *skb)
 {
@@ -331,8 +334,10 @@ void gre_build_header(struct sk_buff *skb, const struct tnl_ptk_info *tpi,
 						skb->len, 0));
 		}
 	}
+
+	ovs_skb_set_inner_protocol(skb, tpi->proto);
 }
-#endif
+EXPORT_SYMBOL_GPL(gre_build_header);
 
 #endif /* CONFIG_NET_IPGRE_DEMUX */
 

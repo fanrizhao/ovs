@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -382,12 +382,14 @@ dpctl_set_if(int argc, const char *argv[], struct dpctl_params *dpctl_p)
                                 "%s: can't change type from %s to %s",
                                  name, type, value);
                     error = EINVAL;
+                    goto next_destroy_args;
                 }
             } else if (!strcmp(key, "port_no")) {
                 if (port_no != u32_to_odp(atoi(value))) {
                     dpctl_error(dpctl_p, 0, "%s: can't change port number from"
                               " %"PRIu32" to %d", name, port_no, atoi(value));
                     error = EINVAL;
+                    goto next_destroy_args;
                 }
             } else if (value[0] == '\0') {
                 smap_remove(&args, key);
@@ -397,7 +399,13 @@ dpctl_set_if(int argc, const char *argv[], struct dpctl_params *dpctl_p)
         }
 
         /* Update configuration. */
-        error = netdev_set_config(netdev, &args, NULL);
+        char *err_s = NULL;
+        error = netdev_set_config(netdev, &args, &err_s);
+        if (err_s || error) {
+            dpctl_error(dpctl_p, error,
+                        err_s ? err_s : "Error updating configuration");
+            free(err_s);
+        }
         if (error) {
             goto next_destroy_args;
         }
@@ -933,10 +941,10 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
             FOR_EACH_CORE_ON_NUMA (iter, dump) {
                 if (ovs_numa_core_is_pinned(iter->core_id)) {
                     error = dpif_flow_put(dpif, flags,
-                                          ofpbuf_data(&key), ofpbuf_size(&key),
-                                          ofpbuf_size(&mask) == 0 ? NULL : ofpbuf_data(&mask),
-                                          ofpbuf_size(&mask), ofpbuf_data(&actions),
-                                          ofpbuf_size(&actions), ufid_present ? &ufid : NULL,
+                                          key.data, key.size,
+                                          mask.size == 0 ? NULL : mask.data,
+                                          mask.size, actions.data,
+                                          actions.size, ufid_present ? &ufid : NULL,
                                           iter->core_id, dpctl_p->print_statistics ? &stats : NULL);
                 }
             }
@@ -946,10 +954,10 @@ dpctl_put_flow(int argc, const char *argv[], enum dpif_flow_put_flags flags,
         }
     } else {
         error = dpif_flow_put(dpif, flags,
-                              ofpbuf_data(&key), ofpbuf_size(&key),
-                              ofpbuf_size(&mask) == 0 ? NULL : ofpbuf_data(&mask),
-                              ofpbuf_size(&mask), ofpbuf_data(&actions),
-                              ofpbuf_size(&actions), ufid_present ? &ufid : NULL,
+                              key.data, key.size,
+                              mask.size == 0 ? NULL : mask.data,
+                              mask.size, actions.data,
+                              actions.size, ufid_present ? &ufid : NULL,
                               PMD_ID_NULL, dpctl_p->print_statistics ? &stats : NULL);
     }
     if (error) {
@@ -1123,8 +1131,8 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
 
             FOR_EACH_CORE_ON_NUMA (iter, dump) {
                 if (ovs_numa_core_is_pinned(iter->core_id)) {
-                    error = dpif_flow_del(dpif, ofpbuf_data(&key),
-                                          ofpbuf_size(&key), ufid_present ? &ufid : NULL,
+                    error = dpif_flow_del(dpif, key.data,
+                                          key.size, ufid_present ? &ufid : NULL,
                                           iter->core_id, dpctl_p->print_statistics ? &stats : NULL);
                 }
             }
@@ -1133,7 +1141,7 @@ dpctl_del_flow(int argc, const char *argv[], struct dpctl_params *dpctl_p)
             error = EINVAL;
         }
     } else {
-        error = dpif_flow_del(dpif, ofpbuf_data(&key), ofpbuf_size(&key),
+        error = dpif_flow_del(dpif, key.data, key.size,
                               ufid_present ? &ufid : NULL, PMD_ID_NULL,
                               dpctl_p->print_statistics ? &stats : NULL);
     }
@@ -1246,7 +1254,7 @@ dpctl_parse_actions(int argc, const char *argv[], struct dpctl_params* dpctl_p)
         }
 
         ds_init(&s);
-        format_odp_actions(&s, ofpbuf_data(&actions), ofpbuf_size(&actions));
+        format_odp_actions(&s, actions.data, actions.size);
         dpctl_print(dpctl_p, "%s\n", ds_cstr(&s));
         ds_destroy(&s);
 
@@ -1390,12 +1398,11 @@ dpctl_normalize_actions(int argc, const char *argv[],
     }
 
     ds_clear(&s);
-    odp_flow_format(ofpbuf_data(&keybuf), ofpbuf_size(&keybuf), NULL, 0, NULL,
+    odp_flow_format(keybuf.data, keybuf.size, NULL, 0, NULL,
                     &s, dpctl_p->verbosity);
     dpctl_print(dpctl_p, "input flow: %s\n", ds_cstr(&s));
 
-    error = odp_flow_key_to_flow(ofpbuf_data(&keybuf), ofpbuf_size(&keybuf),
-                                 &flow);
+    error = odp_flow_key_to_flow(keybuf.data, keybuf.size, &flow);
     if (error) {
         dpctl_error(dpctl_p, error, "odp_flow_key_to_flow");
         goto out_freekeybuf;
@@ -1411,14 +1418,12 @@ dpctl_normalize_actions(int argc, const char *argv[],
 
     if (dpctl_p->verbosity) {
         ds_clear(&s);
-        format_odp_actions(&s, ofpbuf_data(&odp_actions),
-                           ofpbuf_size(&odp_actions));
+        format_odp_actions(&s, odp_actions.data, odp_actions.size);
         dpctl_print(dpctl_p, "input actions: %s\n", ds_cstr(&s));
     }
 
     hmap_init(&actions_per_flow);
-    NL_ATTR_FOR_EACH (a, left, ofpbuf_data(&odp_actions),
-                      ofpbuf_size(&odp_actions)) {
+    NL_ATTR_FOR_EACH (a, left, odp_actions.data, odp_actions.size) {
         const struct ovs_action_push_vlan *push;
         switch(nl_attr_type(a)) {
         case OVS_ACTION_ATTR_POP_VLAN:
@@ -1451,8 +1456,7 @@ dpctl_normalize_actions(int argc, const char *argv[],
     for (i = 0; i < n_afs; i++) {
         struct actions_for_flow *af = afs[i];
 
-        sort_output_actions(ofpbuf_data(&af->actions),
-                            ofpbuf_size(&af->actions));
+        sort_output_actions(af->actions.data, af->actions.size);
 
         if (af->flow.vlan_tci != htons(0)) {
             dpctl_print(dpctl_p, "vlan(vid=%"PRIu16",pcp=%d): ",
@@ -1472,8 +1476,7 @@ dpctl_normalize_actions(int argc, const char *argv[],
         }
 
         ds_clear(&s);
-        format_odp_actions(&s, ofpbuf_data(&af->actions),
-                           ofpbuf_size(&af->actions));
+        format_odp_actions(&s, af->actions.data, af->actions.size);
         dpctl_print(dpctl_p, ds_cstr(&s));
 
         ofpbuf_uninit(&af->actions);
@@ -1572,7 +1575,7 @@ dpctl_unixctl_handler(struct unixctl_conn *conn, int argc, const char *argv[],
 {
     struct ds ds = DS_EMPTY_INITIALIZER;
     struct dpctl_params dpctl_p;
-    bool opt_parse_err = false;
+    bool error = false;
 
     dpctl_command_handler *handler = (dpctl_command_handler *) aux;
 
@@ -1584,7 +1587,7 @@ dpctl_unixctl_handler(struct unixctl_conn *conn, int argc, const char *argv[],
     /* Parse options (like getopt). Unfortunately it does
      * not seem a good idea to call getopt_long() here, since it uses global
      * variables */
-    while (argc > 1 && !opt_parse_err) {
+    while (argc > 1 && !error) {
         const char *arg = argv[1];
         if (!strncmp(arg, "--", 2)) {
             /* Long option */
@@ -1598,13 +1601,13 @@ dpctl_unixctl_handler(struct unixctl_conn *conn, int argc, const char *argv[],
                 dpctl_p.verbosity++;
             } else {
                 ds_put_format(&ds, "Unrecognized option %s", argv[1]);
-                opt_parse_err = true;
+                error = true;
             }
         } else if (arg[0] == '-' && arg[1] != '\0') {
             /* Short option[s] */
             const char *opt = &arg[1];
 
-            while (*opt && !opt_parse_err) {
+            while (*opt && !error) {
                 switch (*opt) {
                 case 'm':
                     dpctl_p.verbosity++;
@@ -1614,7 +1617,7 @@ dpctl_unixctl_handler(struct unixctl_conn *conn, int argc, const char *argv[],
                     break;
                 default:
                     ds_put_format(&ds, "Unrecognized option -%c", *opt);
-                    opt_parse_err = true;
+                    error = true;
                     break;
                 }
                 opt++;
@@ -1624,22 +1627,26 @@ dpctl_unixctl_handler(struct unixctl_conn *conn, int argc, const char *argv[],
             break;
         }
 
-        if (opt_parse_err) {
+        if (error) {
             break;
         }
         argv++;
         argc--;
     }
 
-    if (!opt_parse_err) {
+    if (!error) {
         dpctl_p.is_appctl = true;
         dpctl_p.output = dpctl_unixctl_print;
         dpctl_p.aux = &ds;
 
-        handler(argc, argv, &dpctl_p);
+        error = handler(argc, argv, &dpctl_p) != 0;
     }
 
-    unixctl_command_reply(conn, ds_cstr(&ds));
+    if (error) {
+        unixctl_command_reply_error(conn, ds_cstr(&ds));
+    } else {
+        unixctl_command_reply(conn, ds_cstr(&ds));
+    }
 
     ds_destroy(&ds);
 }

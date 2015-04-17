@@ -26,6 +26,7 @@
 
 #include "coverage.h"
 #include "dpif.h"
+#include "dp-packet.h"
 #include "dynamic-string.h"
 #include "fatal-signal.h"
 #include "hash.h"
@@ -33,7 +34,7 @@
 #include "netdev-dpdk.h"
 #include "netdev-provider.h"
 #include "netdev-vport.h"
-#include "ofpbuf.h"
+#include "odp-netlink.h"
 #include "openflow/openflow.h"
 #include "packets.h"
 #include "poll-loop.h"
@@ -43,6 +44,7 @@
 #include "sset.h"
 #include "svec.h"
 #include "openvswitch/vlog.h"
+#include "flow.h"
 
 VLOG_DEFINE_THIS_MODULE(netdev);
 
@@ -108,7 +110,8 @@ bool
 netdev_is_pmd(const struct netdev *netdev)
 {
     return (!strcmp(netdev->netdev_class->type, "dpdk") ||
-            !strcmp(netdev->netdev_class->type, "dpdkr"));
+            !strcmp(netdev->netdev_class->type, "dpdkr") ||
+            !strcmp(netdev->netdev_class->type, "dpdkvhost"));
 }
 
 static void
@@ -635,7 +638,7 @@ netdev_rxq_close(struct netdev_rxq *rx)
  * Returns EAGAIN immediately if no packet is ready to be received.
  *
  * Returns EMSGSIZE, and discards the packet, if the received packet is longer
- * than 'ofpbuf_tailroom(buffer)'.
+ * than 'dp_packet_tailroom(buffer)'.
  *
  * It is advised that the tailroom of 'buffer' should be
  * VLAN_HEADER_LEN bytes longer than the MTU to allow space for an
@@ -645,7 +648,7 @@ netdev_rxq_close(struct netdev_rxq *rx)
  * This function may be set to null if it would always return EOPNOTSUPP
  * anyhow. */
 int
-netdev_rxq_recv(struct netdev_rxq *rx, struct dpif_packet **buffers, int *cnt)
+netdev_rxq_recv(struct netdev_rxq *rx, struct dp_packet **buffers, int *cnt)
 {
     int retval;
 
@@ -720,7 +723,7 @@ netdev_set_multiq(struct netdev *netdev, unsigned int n_txq,
  * Some network devices may not implement support for this function.  In such
  * cases this function will always return EOPNOTSUPP. */
 int
-netdev_send(struct netdev *netdev, int qid, struct dpif_packet **buffers,
+netdev_send(struct netdev *netdev, int qid, struct dp_packet **buffers,
             int cnt, bool may_steal)
 {
     int error;
@@ -735,32 +738,53 @@ netdev_send(struct netdev *netdev, int qid, struct dpif_packet **buffers,
 }
 
 int
-netdev_pop_header(struct netdev *netdev, struct dpif_packet **buffers, int cnt)
+netdev_pop_header(struct netdev *netdev, struct dp_packet **buffers, int cnt)
 {
-    return (netdev->netdev_class->pop_header
-             ? netdev->netdev_class->pop_header(netdev, buffers, cnt)
-             : EOPNOTSUPP);
+    int i;
+
+    if (!netdev->netdev_class->pop_header) {
+        return EOPNOTSUPP;
+    }
+
+    for (i = 0; i < cnt; i++) {
+        int err;
+
+        err = netdev->netdev_class->pop_header(buffers[i]);
+        if (err) {
+            dp_packet_clear(buffers[i]);
+        }
+    }
+
+    return 0;
 }
 
 int
-netdev_build_header(const struct netdev *netdev, struct ovs_action_push_tnl *data)
+netdev_build_header(const struct netdev *netdev, struct ovs_action_push_tnl *data,
+                    const struct flow *tnl_flow)
 {
     if (netdev->netdev_class->build_header) {
-        return netdev->netdev_class->build_header(netdev, data);
+        return netdev->netdev_class->build_header(netdev, data, tnl_flow);
     }
     return EOPNOTSUPP;
 }
 
 int
 netdev_push_header(const struct netdev *netdev,
-                   struct dpif_packet **buffers, int cnt,
+                   struct dp_packet **buffers, int cnt,
                    const struct ovs_action_push_tnl *data)
 {
-    if (netdev->netdev_class->push_header) {
-        return netdev->netdev_class->push_header(netdev, buffers, cnt, data);
-    } else {
+    int i;
+
+    if (!netdev->netdev_class->push_header) {
         return -EINVAL;
     }
+
+    for (i = 0; i < cnt; i++) {
+        netdev->netdev_class->push_header(buffers[i], data);
+        buffers[i]->md = PKT_METADATA_INITIALIZER(u32_to_odp(data->out_port));
+    }
+
+    return 0;
 }
 
 /* Registers with the poll loop to wake up from the next call to poll_block()

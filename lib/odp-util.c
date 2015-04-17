@@ -510,6 +510,19 @@ format_odp_hash_action(struct ds *ds, const struct ovs_action_hash *hash_act)
     ds_put_format(ds, ")");
 }
 
+static const void *
+format_udp_tnl_push_header(struct ds *ds, const struct ip_header *ip)
+{
+    const struct udp_header *udp;
+
+    udp = (const struct udp_header *) (ip + 1);
+    ds_put_format(ds, "udp(src=%"PRIu16",dst=%"PRIu16",csum=0x%"PRIx16"),",
+                  ntohs(udp->udp_src), ntohs(udp->udp_dst),
+                  ntohs(udp->udp_csum));
+
+    return udp + 1;
+}
+
 static void
 format_odp_tnl_push_header(struct ds *ds, struct ovs_action_push_tnl *data)
 {
@@ -541,18 +554,20 @@ format_odp_tnl_push_header(struct ds *ds, struct ovs_action_push_tnl *data)
 
     if (data->tnl_type == OVS_VPORT_TYPE_VXLAN) {
         const struct vxlanhdr *vxh;
-        const struct udp_header *udp;
 
-        /* UDP */
-        udp = (const struct udp_header *) (ip + 1);
-        ds_put_format(ds, "udp(src=%"PRIu16",dst=%"PRIu16"),",
-                      ntohs(udp->udp_src), ntohs(udp->udp_dst));
+        vxh = format_udp_tnl_push_header(ds, ip);
 
-        /* VxLan */
-        vxh = (const struct vxlanhdr *)   (udp + 1);
         ds_put_format(ds, "vxlan(flags=0x%"PRIx32",vni=0x%"PRIx32")",
                       ntohl(get_16aligned_be32(&vxh->vx_flags)),
-                      ntohl(get_16aligned_be32(&vxh->vx_vni)));
+                      ntohl(get_16aligned_be32(&vxh->vx_vni)) >> 8);
+    } else if (data->tnl_type == OVS_VPORT_TYPE_GENEVE) {
+        const struct genevehdr *gnh;
+
+        gnh = format_udp_tnl_push_header(ds, ip);
+
+        ds_put_format(ds, "geneve(%svni=0x%"PRIx32")",
+                      gnh->oam ? "oam," : "",
+                      ntohl(get_16aligned_be32(&gnh->vni)) >> 8);
     } else if (data->tnl_type == OVS_VPORT_TYPE_GRE) {
         const struct gre_base_hdr *greh;
         ovs_16aligned_be32 *options;
@@ -562,10 +577,10 @@ format_odp_tnl_push_header(struct ds *ds, struct ovs_action_push_tnl *data)
         greh = (const struct gre_base_hdr *) l4;
 
         ds_put_format(ds, "gre((flags=0x%"PRIx16",proto=0x%"PRIx16")",
-                           greh->flags, ntohs(greh->protocol));
+                           ntohs(greh->flags), ntohs(greh->protocol));
         options = (ovs_16aligned_be32 *)(greh + 1);
         if (greh->flags & htons(GRE_CSUM)) {
-            ds_put_format(ds, ",csum=0x%"PRIx32, ntohl(get_16aligned_be32(options)));
+            ds_put_format(ds, ",csum=0x%"PRIx16, ntohs(*((ovs_be16 *)options)));
             options++;
         }
         if (greh->flags & htons(GRE_KEY)) {
@@ -812,8 +827,8 @@ parse_odp_userspace_action(const char *s, struct ofpbuf *actions)
             if (end[0] != ')') {
                 return -EINVAL;
             }
-            user_data = ofpbuf_data(&buf);
-            user_data_size = ofpbuf_size(&buf);
+            user_data = buf.data;
+            user_data_size = buf.size;
             n = (end + 1) - s;
         }
     }
@@ -840,7 +855,7 @@ ovs_parse_tnl_push(const char *s, struct ovs_action_push_tnl *data)
     struct ip_header *ip;
     struct udp_header *udp;
     struct gre_base_hdr *greh;
-    uint16_t gre_proto, dl_type, udp_src, udp_dst;
+    uint16_t gre_proto, gre_flags, dl_type, udp_src, udp_dst, csum;
     ovs_be32 sip, dip;
     uint32_t tnl_type = 0, header_len = 0;
     void *l3, *l4;
@@ -885,40 +900,57 @@ ovs_parse_tnl_push(const char *s, struct ovs_action_push_tnl *data)
     /* Tunnel header */
     udp = (struct udp_header *) l4;
     greh = (struct gre_base_hdr *) l4;
-    if (ovs_scan_len(s, &n, "udp(src=%"SCNi16",dst=%"SCNi16"),",
-                         &udp_src, &udp_dst)) {
-        struct vxlanhdr *vxh;
-        uint32_t vx_flags, vx_vni;
+    if (ovs_scan_len(s, &n, "udp(src=%"SCNi16",dst=%"SCNi16",csum=0x%"SCNx16"),",
+                         &udp_src, &udp_dst, &csum)) {
+        uint32_t vx_flags, vni;
 
         udp->udp_src = htons(udp_src);
         udp->udp_dst = htons(udp_dst);
         udp->udp_len = 0;
-        udp->udp_csum = 0;
+        udp->udp_csum = htons(csum);
 
-        vxh = (struct vxlanhdr *) (udp + 1);
-        if (!ovs_scan_len(s, &n, "vxlan(flags=0x%"SCNx32",vni=0x%"SCNx32"))",
-                            &vx_flags, &vx_vni)) {
+        if (ovs_scan_len(s, &n, "vxlan(flags=0x%"SCNx32",vni=0x%"SCNx32"))",
+                            &vx_flags, &vni)) {
+            struct vxlanhdr *vxh = (struct vxlanhdr *) (udp + 1);
+
+            put_16aligned_be32(&vxh->vx_flags, htonl(vx_flags));
+            put_16aligned_be32(&vxh->vx_vni, htonl(vni << 8));
+            tnl_type = OVS_VPORT_TYPE_VXLAN;
+            header_len = sizeof *eth + sizeof *ip +
+                         sizeof *udp + sizeof *vxh;
+        } else if (ovs_scan_len(s, &n, "geneve(")) {
+            struct genevehdr *gnh = (struct genevehdr *) (udp + 1);
+
+            memset(gnh, 0, sizeof *gnh);
+            if (ovs_scan_len(s, &n, "oam,")) {
+                gnh->oam = 1;
+            }
+            if (!ovs_scan_len(s, &n, "vni=0x%"SCNx32"))", &vni)) {
+                return -EINVAL;
+            }
+            gnh->proto_type = htons(ETH_TYPE_TEB);
+            put_16aligned_be32(&gnh->vni, htonl(vni << 8));
+            tnl_type = OVS_VPORT_TYPE_GENEVE;
+            header_len = sizeof *eth + sizeof *ip +
+                         sizeof *udp + sizeof *gnh;
+        } else {
             return -EINVAL;
         }
-        put_16aligned_be32(&vxh->vx_flags, htonl(vx_flags));
-        put_16aligned_be32(&vxh->vx_vni, htonl(vx_vni));
-        tnl_type = OVS_VPORT_TYPE_VXLAN;
-        header_len = sizeof *eth + sizeof *ip +
-                     sizeof *udp + sizeof *vxh;
     } else if (ovs_scan_len(s, &n, "gre((flags=0x%"SCNx16",proto=0x%"SCNx16")",
-                         &greh->flags, &gre_proto)){
+                         &gre_flags, &gre_proto)){
 
         tnl_type = OVS_VPORT_TYPE_GRE;
+        greh->flags = htons(gre_flags);
         greh->protocol = htons(gre_proto);
         ovs_16aligned_be32 *options = (ovs_16aligned_be32 *) (greh + 1);
 
         if (greh->flags & htons(GRE_CSUM)) {
-            uint32_t csum;
-
-            if (!ovs_scan_len(s, &n, ",csum=0x%"SCNx32, &csum)) {
+            if (!ovs_scan_len(s, &n, ",csum=0x%"SCNx16, &csum)) {
                 return -EINVAL;
             }
-            put_16aligned_be32(options, htonl(csum));
+
+            memset(options, 0, sizeof *options);
+            *((ovs_be16 *)options) = htons(csum);
             options++;
         }
         if (greh->flags & htons(GRE_KEY)) {
@@ -1154,7 +1186,7 @@ odp_actions_from_string(const char *s, const struct simap *port_names,
         return 0;
     }
 
-    old_size = ofpbuf_size(actions);
+    old_size = actions->size;
     for (;;) {
         int retval;
 
@@ -1165,7 +1197,7 @@ odp_actions_from_string(const char *s, const struct simap *port_names,
 
         retval = parse_odp_action(s, port_names, actions);
         if (retval < 0 || !strchr(delimiters, s[retval])) {
-            ofpbuf_set_size(actions, old_size);
+            actions->size = old_size;
             return -retval;
         }
         s += retval;
@@ -2028,7 +2060,7 @@ generate_all_wildcard_mask(struct ofpbuf *ofp, const struct nlattr *key)
         nl_msg_end_nested(ofp, nested_mask);
     }
 
-    return ofpbuf_base(ofp);
+    return ofp->base;
 }
 
 int
@@ -2591,6 +2623,15 @@ scan_mpls_bos(const char *s, ovs_be32 *key, ovs_be32 *mask)
         do {                                    \
             len = 0;
 
+/* Init as fully-masked as mask will not be scanned. */
+#define SCAN_BEGIN_FULLY_MASKED(NAME, TYPE)     \
+    SCAN_IF(NAME);                              \
+        TYPE skey, smask;                       \
+        memset(&skey, 0, sizeof skey);          \
+        memset(&smask, 0xff, sizeof smask);     \
+        do {                                    \
+            len = 0;
+
 /* VLAN needs special initialization. */
 #define SCAN_BEGIN_INIT(NAME, TYPE, KEY_INIT, MASK_INIT)  \
     SCAN_IF(NAME);                                        \
@@ -2652,9 +2693,9 @@ scan_mpls_bos(const char *s, ovs_be32 *key, ovs_be32 *mask)
         SCAN_TYPE(SCAN_AS, &skey, &smask);           \
     } SCAN_END_SINGLE(ATTR)
 
-#define SCAN_SINGLE_NO_MASK(NAME, TYPE, SCAN_AS, ATTR)       \
-    SCAN_BEGIN(NAME, TYPE) {                         \
-        SCAN_TYPE(SCAN_AS, &skey, NULL);           \
+#define SCAN_SINGLE_FULLY_MASKED(NAME, TYPE, SCAN_AS, ATTR) \
+    SCAN_BEGIN_FULLY_MASKED(NAME, TYPE) {                   \
+        SCAN_TYPE(SCAN_AS, &skey, NULL);                    \
     } SCAN_END_SINGLE(ATTR)
 
 /* scan_port needs one extra argument. */
@@ -2673,7 +2714,8 @@ parse_odp_key_mask_attr(const char *s, const struct simap *port_names,
 {
     SCAN_SINGLE("skb_priority(", uint32_t, u32, OVS_KEY_ATTR_PRIORITY);
     SCAN_SINGLE("skb_mark(", uint32_t, u32, OVS_KEY_ATTR_SKB_MARK);
-    SCAN_SINGLE_NO_MASK("recirc_id(", uint32_t, u32, OVS_KEY_ATTR_RECIRC_ID);
+    SCAN_SINGLE_FULLY_MASKED("recirc_id(", uint32_t, u32,
+                             OVS_KEY_ATTR_RECIRC_ID);
     SCAN_SINGLE("dp_hash(", uint32_t, u32, OVS_KEY_ATTR_DP_HASH);
 
     SCAN_BEGIN("tunnel(", struct flow_tnl) {
@@ -2830,7 +2872,7 @@ int
 odp_flow_from_string(const char *s, const struct simap *port_names,
                      struct ofpbuf *key, struct ofpbuf *mask)
 {
-    const size_t old_size = ofpbuf_size(key);
+    const size_t old_size = key->size;
     for (;;) {
         int retval;
 
@@ -2841,7 +2883,7 @@ odp_flow_from_string(const char *s, const struct simap *port_names,
 
         retval = parse_odp_key_mask_attr(s, port_names, key, mask);
         if (retval < 0) {
-            ofpbuf_set_size(key, old_size);
+            key->size = old_size;
             return -retval;
         }
         s += retval;
@@ -3826,7 +3868,7 @@ odp_put_userspace_action(uint32_t pid,
     offset = nl_msg_start_nested(odp_actions, OVS_ACTION_ATTR_USERSPACE);
     nl_msg_put_u32(odp_actions, OVS_USERSPACE_ATTR_PID, pid);
     if (userdata) {
-        userdata_ofs = ofpbuf_size(odp_actions) + NLA_HDRLEN;
+        userdata_ofs = odp_actions->size + NLA_HDRLEN;
 
         /* The OVS kernel module before OVS 1.11 and the upstream Linux kernel
          * module before Linux 3.10 required the userdata to be exactly 8 bytes

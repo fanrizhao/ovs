@@ -8,7 +8,9 @@
 
 #include <linux/version.h>
 
-#ifdef USE_KERNEL_TUNNEL_API
+#ifdef HAVE_VXLAN_METADATA
+#define USE_UPSTREAM_VXLAN
+
 #include_next <net/vxlan.h>
 #endif
 
@@ -77,13 +79,15 @@ struct vxlanhdr_gbp {
 #define VXLAN_F_GBP			0x800
 #endif
 
+#ifndef VXLAN_F_UDP_CSUM
+#define VXLAN_F_UDP_CSUM                0x40
+#endif
+
 #ifndef VXLAN_F_RCV_FLAGS
 #define VXLAN_F_RCV_FLAGS			VXLAN_F_GBP
 #endif
 
-#ifdef HAVE_VXLAN_METADATA
-#define USE_UPSTREAM_VXLAN
-
+#ifdef USE_UPSTREAM_VXLAN
 static inline int rpl_vxlan_xmit_skb(struct vxlan_sock *vs,
                    struct rtable *rt, struct sk_buff *skb,
                    __be32 src, __be32 dst, __u8 tos, __u8 ttl, __be16 df,
@@ -100,7 +104,7 @@ static inline int rpl_vxlan_xmit_skb(struct vxlan_sock *vs,
 }
 
 #define vxlan_xmit_skb rpl_vxlan_xmit_skb
-#else /* HAVE_VXLAN_METADATA */
+#else /* USE_UPSTREAM_VXLAN */
 
 struct vxlan_metadata {
 	__be32		vni;
@@ -139,9 +143,6 @@ int vxlan_xmit_skb(struct vxlan_sock *vs,
 		   __be32 src, __be32 dst, __u8 tos, __u8 ttl, __be16 df,
 		   __be16 src_port, __be16 dst_port,
 		   struct vxlan_metadata *md, bool xnet, u32 vxflags);
-
-#define vxlan_src_port rpl_vxlan_src_port
-__be16 vxlan_src_port(__u16 port_min, __u16 port_max, struct sk_buff *skb);
 
 #endif /* !HAVE_VXLAN_METADATA */
 #endif

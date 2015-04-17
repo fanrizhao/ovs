@@ -13,14 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-check_command_avail () {
-    while [ $# -ne 0 ]; do
-        if ("$1" --version) > /dev/null 2>&1; then :; else
-            echo >&2 "$UTIL: missing $1, cannot proceed"
-            exit 1
+# Check for programs we'll need.
+search_path () {
+    save_IFS=$IFS
+    IFS=:
+    for dir in $PATH; do
+        IFS=$save_IFS
+        if test -x "$dir/$1"; then
+            return 0
         fi
-        shift
     done
+    IFS=$save_IFS
+    echo >&2 "$0: $1 not found in \$PATH, please install and try again"
+    exit 1
 }
 
 ovs_vsctl () {
@@ -65,6 +70,15 @@ add_port () {
 
     if [ "$#" -lt 3 ]; then
         usage
+        exit 1
+    fi
+
+    # Check if a port is already attached for the given container and interface
+    PORT=`get_port_for_container_interface "$CONTAINER" "$INTERFACE" \
+            2>/dev/null`
+    if [ -n "$PORT" ]; then
+        echo >&2 "$UTIL: Port already attached" \
+                 "for CONTAINER=$CONTAINER and INTERFACE=$INTERFACE"
         exit 1
     fi
 
@@ -201,7 +215,9 @@ EOF
 }
 
 UTIL=$(basename $0)
-check_command_avail ovs-vsctl docker uuidgen
+search_path ovs-vsctl
+search_path docker
+search_path uuidgen
 
 if (ip netns) > /dev/null 2>&1; then :; else
     echo >&2 "$UTIL: ip utility not found (or it does not support netns),"\

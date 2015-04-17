@@ -740,8 +740,7 @@ update_in_band_remotes(struct connmgr *mgr)
         } sa;
 
         if (ofconn->band == OFPROTO_IN_BAND
-            && stream_parse_target_with_default_port(target, OFP_OLD_PORT,
-                                                     &sa.ss)
+            && stream_parse_target_with_default_port(target, OFP_PORT, &sa.ss)
             && sa.ss.ss_family == AF_INET) {
             addrs[n_addrs++] = sa.in;
         }
@@ -1094,10 +1093,9 @@ ofconn_send_reply(const struct ofconn *ofconn, struct ofpbuf *msg)
 void
 ofconn_send_replies(const struct ofconn *ofconn, struct ovs_list *replies)
 {
-    struct ofpbuf *reply, *next;
+    struct ofpbuf *reply;
 
-    LIST_FOR_EACH_SAFE (reply, next, list_node, replies) {
-        list_remove(&reply->list_node);
+    LIST_FOR_EACH_POP (reply, list_node, replies) {
         ofconn_send_reply(ofconn, reply);
     }
 }
@@ -1133,7 +1131,7 @@ ofconn_send_error(const struct ofconn *ofconn,
 /* Same as pktbuf_retrieve(), using the pktbuf owned by 'ofconn'. */
 enum ofperr
 ofconn_pktbuf_retrieve(struct ofconn *ofconn, uint32_t id,
-                       struct ofpbuf **bufferp, ofp_port_t *in_port)
+                       struct dp_packet **bufferp, ofp_port_t *in_port)
 {
     return pktbuf_retrieve(ofconn->pktbuf, id, bufferp, in_port);
 }
@@ -1725,11 +1723,9 @@ connmgr_send_packet_in(struct connmgr *mgr,
 static void
 do_send_packet_ins(struct ofconn *ofconn, struct ovs_list *txq)
 {
-    struct ofpbuf *pin, *next_pin;
+    struct ofpbuf *pin;
 
-    LIST_FOR_EACH_SAFE (pin, next_pin, list_node, txq) {
-        list_remove(&pin->list_node);
-
+    LIST_FOR_EACH_POP (pin, list_node, txq) {
         if (rconn_send_with_limit(ofconn->rconn, pin,
                                   ofconn->packet_in_counter, 100) == EAGAIN) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 5);
@@ -1979,8 +1975,8 @@ connmgr_flushed(struct connmgr *mgr)
         ofpact_pad(&ofpacts);
 
         match_init_catchall(&match);
-        ofproto_add_flow(mgr->ofproto, &match, 0, ofpbuf_data(&ofpacts),
-                                                  ofpbuf_size(&ofpacts));
+        ofproto_add_flow(mgr->ofproto, &match, 0, ofpacts.data,
+                                                  ofpacts.size);
 
         ofpbuf_uninit(&ofpacts);
     }
@@ -2256,12 +2252,11 @@ ofmonitor_flush(struct connmgr *mgr)
     struct ofconn *ofconn;
 
     LIST_FOR_EACH (ofconn, node, &mgr->all_conns) {
-        struct ofpbuf *msg, *next;
+        struct ofpbuf *msg;
 
-        LIST_FOR_EACH_SAFE (msg, next, list_node, &ofconn->updates) {
+        LIST_FOR_EACH_POP (msg, list_node, &ofconn->updates) {
             unsigned int n_bytes;
 
-            list_remove(&msg->list_node);
             ofconn_send(ofconn, msg, ofconn->monitor_counter);
             n_bytes = rconn_packet_counter_n_bytes(ofconn->monitor_counter);
             if (!ofconn->monitor_paused && n_bytes > 128 * 1024) {

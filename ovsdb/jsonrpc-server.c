@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014 Nicira, Inc.
+/* Copyright (c) 2009, 2010, 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,8 +78,9 @@ static void ovsdb_jsonrpc_trigger_complete_done(
     struct ovsdb_jsonrpc_session *);
 
 /* Monitors. */
-static struct json *ovsdb_jsonrpc_monitor_create(
-    struct ovsdb_jsonrpc_session *, struct ovsdb *, struct json *params);
+static struct jsonrpc_msg *ovsdb_jsonrpc_monitor_create(
+    struct ovsdb_jsonrpc_session *, struct ovsdb *, struct json *params,
+    const struct json *request_id);
 static struct jsonrpc_msg *ovsdb_jsonrpc_monitor_cancel(
     struct ovsdb_jsonrpc_session *,
     struct json_array *params,
@@ -121,7 +122,7 @@ ovsdb_jsonrpc_server_create(void)
 {
     struct ovsdb_jsonrpc_server *server = xzalloc(sizeof *server);
     ovsdb_server_init(&server->up);
-    server->max_sessions = 64;
+    server->max_sessions = 330;   /* Random limit. */
     shash_init(&server->remotes);
     return server;
 }
@@ -198,10 +199,16 @@ ovsdb_jsonrpc_server_set_remotes(struct ovsdb_jsonrpc_server *svr,
     struct shash_node *node, *next;
 
     SHASH_FOR_EACH_SAFE (node, next, &svr->remotes) {
-        if (!shash_find(new_remotes, node->name)) {
+        struct ovsdb_jsonrpc_remote *remote = node->data;
+        struct ovsdb_jsonrpc_options *options
+            = shash_find_data(new_remotes, node->name);
+
+        if (!options) {
             VLOG_INFO("%s: remote deconfigured", node->name);
             ovsdb_jsonrpc_server_del_remote(node);
-        }
+        } else if (options->dscp != remote->dscp) {
+            ovsdb_jsonrpc_server_del_remote(node);
+         }
     }
     SHASH_FOR_EACH (node, new_remotes) {
         const struct ovsdb_jsonrpc_options *options = node->data;
@@ -308,20 +315,26 @@ ovsdb_jsonrpc_server_run(struct ovsdb_jsonrpc_server *svr)
     SHASH_FOR_EACH (node, &svr->remotes) {
         struct ovsdb_jsonrpc_remote *remote = node->data;
 
-        if (remote->listener && svr->n_sessions < svr->max_sessions) {
-            struct stream *stream;
-            int error;
+        if (remote->listener) {
+            if (svr->n_sessions < svr->max_sessions) {
+                struct stream *stream;
+                int error;
 
-            error = pstream_accept(remote->listener, &stream);
-            if (!error) {
-                struct jsonrpc_session *js;
-                js = jsonrpc_session_open_unreliably(jsonrpc_open(stream),
-                                                     remote->dscp);
-                ovsdb_jsonrpc_session_create(remote, js);
-            } else if (error != EAGAIN) {
-                VLOG_WARN_RL(&rl, "%s: accept failed: %s",
+                error = pstream_accept(remote->listener, &stream);
+                if (!error) {
+                    struct jsonrpc_session *js;
+                    js = jsonrpc_session_open_unreliably(jsonrpc_open(stream),
+                                                         remote->dscp);
+                    ovsdb_jsonrpc_session_create(remote, js);
+                } else if (error != EAGAIN) {
+                    VLOG_WARN_RL(&rl, "%s: accept failed: %s",
+                                 pstream_get_name(remote->listener),
+                                 ovs_strerror(error));
+                }
+            } else {
+                VLOG_WARN_RL(&rl, "%s: connection exceeded maximum (%d)",
                              pstream_get_name(remote->listener),
-                             ovs_strerror(error));
+                             svr->max_sessions);
             }
         }
 
@@ -384,8 +397,6 @@ static int ovsdb_jsonrpc_session_run(struct ovsdb_jsonrpc_session *);
 static void ovsdb_jsonrpc_session_wait(struct ovsdb_jsonrpc_session *);
 static void ovsdb_jsonrpc_session_get_memory_usage(
     const struct ovsdb_jsonrpc_session *, struct simap *usage);
-static void ovsdb_jsonrpc_session_set_options(
-    struct ovsdb_jsonrpc_session *, const struct ovsdb_jsonrpc_options *);
 static void ovsdb_jsonrpc_session_got_request(struct ovsdb_jsonrpc_session *,
                                              struct jsonrpc_msg *);
 static void ovsdb_jsonrpc_session_got_notify(struct ovsdb_jsonrpc_session *,
@@ -556,7 +567,10 @@ ovsdb_jsonrpc_session_reconnect_all(struct ovsdb_jsonrpc_remote *remote)
 }
 
 /* Sets the options for all of the JSON-RPC sessions managed by 'remote' to
- * 'options'. */
+ * 'options'.
+ *
+ * (The dscp value can't be changed directly; the caller must instead close and
+ * re-open the session.) */
 static void
 ovsdb_jsonrpc_session_set_all_options(
     struct ovsdb_jsonrpc_remote *remote,
@@ -564,22 +578,6 @@ ovsdb_jsonrpc_session_set_all_options(
 {
     struct ovsdb_jsonrpc_session *s;
 
-    if (remote->listener) {
-        int error;
-
-        error = pstream_set_dscp(remote->listener, options->dscp);
-        if (error) {
-            VLOG_ERR("%s: set_dscp failed %s",
-                     pstream_get_name(remote->listener), ovs_strerror(error));
-        } else {
-            remote->dscp = options->dscp;
-        }
-        /*
-         * XXX race window between setting dscp to listening socket
-         * and accepting socket. Accepted socket may have old dscp value.
-         * Ignore this race window for now.
-         */
-    }
     LIST_FOR_EACH (s, node, &remote->sessions) {
         ovsdb_jsonrpc_session_set_options(s, options);
     }
@@ -677,7 +675,7 @@ ovsdb_jsonrpc_lookup_db(const struct ovsdb_jsonrpc_session *s,
     return db;
 
 error:
-    *replyp = jsonrpc_create_reply(ovsdb_error_to_json(error), request->id);
+    *replyp = jsonrpc_create_error(ovsdb_error_to_json(error), request->id);
     ovsdb_error_destroy(error);
     return NULL;
 }
@@ -755,7 +753,7 @@ ovsdb_jsonrpc_session_lock(struct ovsdb_jsonrpc_session *s,
     return jsonrpc_create_reply(result, request->id);
 
 error:
-    reply = jsonrpc_create_reply(ovsdb_error_to_json(error), request->id);
+    reply = jsonrpc_create_error(ovsdb_error_to_json(error), request->id);
     ovsdb_error_destroy(error);
     return reply;
 }
@@ -815,7 +813,7 @@ ovsdb_jsonrpc_session_unlock(struct ovsdb_jsonrpc_session *s,
     return jsonrpc_create_reply(json_object_create(), request->id);
 
 error:
-    reply = jsonrpc_create_reply(ovsdb_error_to_json(error), request->id);
+    reply = jsonrpc_create_error(ovsdb_error_to_json(error), request->id);
     ovsdb_error_destroy(error);
     return reply;
 }
@@ -845,9 +843,8 @@ ovsdb_jsonrpc_session_got_request(struct ovsdb_jsonrpc_session *s,
     } else if (!strcmp(request->method, "monitor")) {
         struct ovsdb *db = ovsdb_jsonrpc_lookup_db(s, request, &reply);
         if (!reply) {
-            reply = jsonrpc_create_reply(
-                ovsdb_jsonrpc_monitor_create(s, db, request->params),
-                request->id);
+            reply = ovsdb_jsonrpc_monitor_create(s, db, request->params,
+                                                 request->id);
         }
     } else if (!strcmp(request->method, "monitor_cancel")) {
         reply = ovsdb_jsonrpc_monitor_cancel(s, json_array(request->params),
@@ -1224,9 +1221,10 @@ ovsdb_jsonrpc_parse_monitor_request(struct ovsdb_jsonrpc_monitor_table *mt,
     return NULL;
 }
 
-static struct json *
+static struct jsonrpc_msg *
 ovsdb_jsonrpc_monitor_create(struct ovsdb_jsonrpc_session *s, struct ovsdb *db,
-                             struct json *params)
+                             struct json *params,
+                             const struct json *request_id)
 {
     struct ovsdb_jsonrpc_monitor *m = NULL;
     struct json *monitor_id, *monitor_requests;
@@ -1313,7 +1311,8 @@ ovsdb_jsonrpc_monitor_create(struct ovsdb_jsonrpc_session *s, struct ovsdb *db,
         }
     }
 
-    return ovsdb_jsonrpc_monitor_get_initial(m);
+    return jsonrpc_create_reply(ovsdb_jsonrpc_monitor_get_initial(m),
+                                request_id);
 
 error:
     if (m) {
@@ -1322,7 +1321,7 @@ error:
 
     json = ovsdb_error_to_json(error);
     ovsdb_error_destroy(error);
-    return json;
+    return jsonrpc_create_error(json, request_id);
 }
 
 static struct jsonrpc_msg *

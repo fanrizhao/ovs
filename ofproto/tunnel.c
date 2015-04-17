@@ -333,7 +333,9 @@ tnl_ecn_ok(const struct flow *base_flow, struct flow *flow,
 {
     if (is_ip_any(base_flow)) {
         if ((flow->tunnel.ip_tos & IP_ECN_MASK) == IP_ECN_CE) {
-            wc->masks.nw_tos |= IP_ECN_MASK;
+            if (wc) {
+                wc->masks.nw_tos |= IP_ECN_MASK;
+            }
             if ((base_flow->nw_tos & IP_ECN_MASK) == IP_ECN_NOT_ECT) {
                 VLOG_WARN_RL(&rl, "dropping tunnel packet marked ECN CE"
                              " but is not ECN capable");
@@ -362,21 +364,22 @@ tnl_xlate_init(const struct flow *base_flow, struct flow *flow,
      * always unwildcard the 'in_port', we do not need to unwildcard
      * the 'tunnel.ip_dst' for non-tunneled packets. */
     if (tnl_port_should_receive(flow)) {
-        wc->masks.tunnel.tun_id = OVS_BE64_MAX;
-        wc->masks.tunnel.ip_src = OVS_BE32_MAX;
-        wc->masks.tunnel.ip_dst = OVS_BE32_MAX;
-        wc->masks.tunnel.flags = (FLOW_TNL_F_DONT_FRAGMENT |
-                                  FLOW_TNL_F_CSUM |
-                                  FLOW_TNL_F_KEY);
-        wc->masks.tunnel.ip_tos = UINT8_MAX;
-        wc->masks.tunnel.ip_ttl = UINT8_MAX;
-        /* The tp_src and tp_dst members in flow_tnl are set to be always
-         * wildcarded, not to unwildcard them here. */
-        wc->masks.tunnel.tp_src = 0;
-        wc->masks.tunnel.tp_dst = 0;
+        if (wc) {
+            wc->masks.tunnel.tun_id = OVS_BE64_MAX;
+            wc->masks.tunnel.ip_src = OVS_BE32_MAX;
+            wc->masks.tunnel.ip_dst = OVS_BE32_MAX;
+            wc->masks.tunnel.flags = (FLOW_TNL_F_DONT_FRAGMENT |
+                                      FLOW_TNL_F_CSUM |
+                                      FLOW_TNL_F_KEY);
+            wc->masks.tunnel.ip_tos = UINT8_MAX;
+            wc->masks.tunnel.ip_ttl = UINT8_MAX;
+            /* The tp_src and tp_dst members in flow_tnl are set to be always
+             * wildcarded, not to unwildcard them here. */
+            wc->masks.tunnel.tp_src = 0;
+            wc->masks.tunnel.tp_dst = 0;
 
-        memset(&wc->masks.pkt_mark, 0xff, sizeof wc->masks.pkt_mark);
-
+            memset(&wc->masks.pkt_mark, 0xff, sizeof wc->masks.pkt_mark);
+        }
         if (!tnl_ecn_ok(base_flow, flow, wc)) {
             return false;
         }
@@ -706,7 +709,7 @@ tnl_port_build_header(const struct ofport_dpif *ofport,
     put_16aligned_be32(&ip->ip_src, ip_src);
     put_16aligned_be32(&ip->ip_dst, tnl_flow->tunnel.ip_dst);
 
-    res = netdev_build_header(tnl_port->netdev, data);
+    res = netdev_build_header(tnl_port->netdev, data, tnl_flow);
     ip->ip_csum = csum(ip, sizeof *ip);
     fat_rwlock_unlock(&rwlock);
 

@@ -101,7 +101,7 @@ tnl_port_map_insert(odp_port_t port, ovs_be32 ip_dst, ovs_be16 udp_port,
 
         cls_rule_init(&p->cr, &match, 0);   /* Priority == 0. */
         ovs_refcount_init(&p->ref_cnt);
-        strncpy(p->dev_name, dev_name, IFNAMSIZ);
+        ovs_strlcpy(p->dev_name, dev_name, sizeof p->dev_name);
 
         classifier_insert(&cls, &p->cr, NULL, 0);
     }
@@ -169,15 +169,15 @@ tnl_port_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
         ofpbuf_use_stack(&buf, &keybuf, sizeof keybuf);
         odp_flow_key_from_flow(&buf, &flow, &wc.masks,
                                flow.in_port.odp_port, true);
-        key = ofpbuf_data(&buf);
-        key_len = ofpbuf_size(&buf);
+        key = buf.data;
+        key_len = buf.size;
         /* mask*/
         ofpbuf_use_stack(&buf, &maskbuf, sizeof maskbuf);
         odp_flow_key_from_mask(&buf, &wc.masks, &flow,
                                odp_to_u32(wc.masks.in_port.odp_port),
                                SIZE_MAX, false);
-        mask = ofpbuf_data(&buf);
-        mask_len = ofpbuf_size(&buf);
+        mask = buf.data;
+        mask_len = buf.size;
 
         /* build string. */
         odp_flow_format(key, key_len, mask, mask_len, NULL, &ds, false);

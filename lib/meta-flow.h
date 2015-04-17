@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2012, 2013, 2014 Nicira, Inc.
+ * Copyright (c) 2011, 2012, 2013, 2014, 2015 Nicira, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -577,7 +577,7 @@ enum OVS_PACKED_ENUM mf_field_id {
 #if FLOW_N_XREGS == 4
     /* "xreg<N>".
      *
-     * OpenFlow 1.5 (draft) ``extended register".  Each extended register
+     * OpenFlow 1.5 ``extended register".  Each extended register
      * overlays two of the Nicira extension 32-bit registers: xreg0 overlays
      * reg0 and reg1, with reg0 supplying the most-significant bits of xreg0
      * and reg1 the least-significant.  xreg1 similarly overlays reg2 and reg3,
@@ -1574,6 +1574,12 @@ union mf_subvalue {
 };
 BUILD_ASSERT_DECL(sizeof(union mf_value) == sizeof (union mf_subvalue));
 
+/* An array of fields with values */
+struct field_array {
+    struct mf_bitmap used;
+    union mf_value value[MFF_N_IDS];
+};
+
 /* Finding mf_fields. */
 const struct mf_field *mf_from_name(const char *name);
 
@@ -1595,6 +1601,8 @@ void mf_get_mask(const struct mf_field *, const struct flow_wildcards *,
 /* Prerequisites. */
 bool mf_are_prereqs_ok(const struct mf_field *, const struct flow *);
 void mf_mask_field_and_prereqs(const struct mf_field *, struct flow *mask);
+void mf_bitmap_set_field_and_prereqs(const struct mf_field *mf, struct
+                                     mf_bitmap *bm);
 
 static inline bool
 mf_is_l3_or_higher(const struct mf_field *mf)
@@ -1651,5 +1659,9 @@ void mf_format(const struct mf_field *,
                const union mf_value *value, const union mf_value *mask,
                struct ds *);
 void mf_format_subvalue(const union mf_subvalue *subvalue, struct ds *s);
+
+/* Field Arrays. */
+void field_array_set(enum mf_field_id id, const union mf_value *,
+                     struct field_array *);
 
 #endif /* meta-flow.h */
