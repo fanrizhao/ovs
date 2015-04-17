@@ -3,10 +3,29 @@
 $ ./configure --with-debug --enable-blueswitch --prefix=$OVS_INSTALL_ROOT
 $ make && make install
 
-- Configuration
+- Configure shell environment
 
-$ export OVS_RUN=$OVS_INSTALL_ROOT/var/run/openvswitch
+$ export OVS=$OVS_INSTALL_ROOT
+$ export OVS_BIN=$OVS/sbin
+$ export OVS_RUN=$OVS/var/run/openvswitch
 $ alias vsctl="ovs-vsctl --db=unix:$OVS_RUN/db.sock"
+
+- Starting OvS
+
+# Start the DB server.
+
+$ $OVS_BIN/ovsdb-server $OVS/etc/openvswitch/conf.db \
+                      --remote=punix:$OVS_RUN/db.sock \
+                      --remote=db:Open_vSwitch,Open_vSwitch,manager_options \
+                      --pidfile=$OVS_RUN/ovsdb-server.pid \
+                      --log-file=$OVS_RUN/ovsdb-server.log \
+                      --unixctl=none
+
+# Start OVS switch daemon.
+
+$ $OVS_BIN/ovs-vswitchd --pidfile -v
+
+- Initial system configuration
 
 $ vsctl add-br unix:$OVS_RUN/br0.mgmt \
      -- set bridge unix:$OVS_RUN/br0.mgmt datapath_type=blueswitch fail-mode=secure protocols=OpenFlow13
